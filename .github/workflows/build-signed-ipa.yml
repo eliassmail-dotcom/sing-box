@@ -65,7 +65,11 @@ jobs:
           CERTIFICATE_PATH=$RUNNER_TEMP/AppleDistribution.p12
           KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain-db
           KEYCHAIN_PASSWORD=build
-          echo -n "$APPLE_DEV_P12" | base64 --decode -o "$CERTIFICATE_PATH"
+          echo "secret b64 length: ${#APPLE_DEV_P12}"
+          echo -n "$APPLE_DEV_P12" | openssl base64 -d -A -out "$CERTIFICATE_PATH"
+          ls -l "$CERTIFICATE_PATH"
+          md5 -q "$CERTIFICATE_PATH"
+          openssl pkcs12 -info -in "$CERTIFICATE_PATH" -passin "pass:$P12_PASSWORD" -noout
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
@@ -80,7 +84,7 @@ jobs:
           PROFILE_B64: ${{ secrets.PROFILE_B64 }}
         run: |-
           cd clients/apple
-          echo -n "$PROFILE_B64" | base64 --decode -o build/profile.mobileprovision
+          echo -n "$PROFILE_B64" | openssl base64 -d -A -out build/profile.mobileprovision
           security cms -D -i build/profile.mobileprovision > build/profile.plist
           plutil -extract Entitlements xml1 -o build/Entitlements.plist build/profile.plist
           plutil -p build/Entitlements.plist | head -40
