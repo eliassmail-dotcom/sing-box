@@ -22,6 +22,7 @@ jobs:
         run: |-
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive clients/apple
+          git -C clients/apple checkout mlkem
           git -C clients/apple rev-parse HEAD
 
       - name: Setup Go
