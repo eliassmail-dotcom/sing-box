@@ -200,9 +200,13 @@ func (e *RealityClientConfig) ClientHandshake(ctx context.Context, conn net.Conn
 	}
 	binary.BigEndian.PutUint64(hello.SessionId, uint64(nowTime.Unix()))
 
-	hello.SessionId[0] = 1
-	hello.SessionId[1] = 8
-	hello.SessionId[2] = 1
+	// Client version >= 26.3.27 (Xray v26.7.11 raised default minClientVer to
+	// 26.3.27; comparison is >=). Clients announcing 1.8.1 are silently dropped
+	// by REALITY servers: fallback to the real destination (x509 errors) or EOF.
+	// Mirrors sing-box-lx SPEC 053.
+	hello.SessionId[0] = 26
+	hello.SessionId[1] = 3
+	hello.SessionId[2] = 27
 	binary.BigEndian.PutUint32(hello.SessionId[4:], uint32(time.Now().Unix()))
 	copy(hello.SessionId[8:], e.shortID[:])
 	if debug.Enabled {
