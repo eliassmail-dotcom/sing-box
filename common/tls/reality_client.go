@@ -140,9 +140,20 @@ func (e *RealityClientConfig) ClientHandshake(ctx context.Context, conn net.Conn
 	uConfig.InsecureSkipVerify = true
 	uConfig.SessionTicketsDisabled = true
 	uConfig.VerifyPeerCertificate = verifier.VerifyPeerCertificate
+	// Wrap the raw conn with the configured ClientHello wrappers (tls
+	// `fragment` / `record_fragment`) before building the UConn, so the
+	// REALITY client honors them exactly like the plain uTLS client. Without
+	// this, a hybrid X25519MLKEM768 ClientHello (~1.9 KB) sent as a single
+	// record behind a detour leg can exceed the path MTU and never reach the
+	// server intact — the server then silently falls back to the camouflage
+	// destination (observed as x509/EOF). Mirrors sing-box-lx SPEC 088.
+	conn, err := e.uClient.wrapClientConn(conn)
+	if err != nil {
+		return nil, err
+	}
 	uConn := utls.UClient(conn, uConfig, e.uClient.id)
 	verifier.UConn = uConn
-	err := uConn.BuildHandshakeState()
+	err = uConn.BuildHandshakeState()
 	if err != nil {
 		return nil, err
 	}

@@ -77,12 +77,54 @@ type ClientOptions struct {
 	Options              option.OutboundTLSOptions
 	AllowEmptyServerName bool
 	KTLSCompatible       bool
+	// DialedThroughDetour marks that this client's TCP leg is carried by another
+	// outbound rather than the local network stack. It turns on ClientHello
+	// record fragmentation by default — see applyDetourFragmentDefault.
+	DialedThroughDetour bool
+}
+
+// DialedThroughDetour reports whether an outbound with these dialer options
+// sends its bytes through another outbound instead of the local network stack.
+// Only an explicit `detour` is visible here, which is all that is needed:
+// proxy outbounds always carry "through someone else's server" from the
+// config as `detour`.
+func DialedThroughDetour(options option.DialerOptions) bool {
+	return options.Detour != ""
+}
+
+// applyDetourFragmentDefault enables record fragmentation when the connection is
+// carried by another outbound and the config asked for no fragmentation itself.
+//
+// Why: under a detour the leg forwards our ClientHello from its own address. If
+// the PMTU beyond that leg is smaller than the ClientHello, the packet is
+// dropped and the ICMP "fragmentation needed" never reaches us — the server
+// never sees a valid hello and silently falls back to the camouflage
+// destination (observed as EOF or x509 errors on REALITY nodes). The hybrid
+// X25519MLKEM768 ClientHello is ~1.9 KB, well above a typical tunnel PMTU.
+// Splitting the first TLS record puts every piece under it.
+//
+// Cost is confined to the handshake: tlsfragment only rewrites the first
+// record, so steady-state traffic is untouched.
+//
+// An explicit `fragment` or `record_fragment` in the config always wins — this
+// only fills in the case where the user asked for nothing.
+func applyDetourFragmentDefault(options *ClientOptions) {
+	if !options.DialedThroughDetour {
+		return
+	}
+	if options.Options.Fragment || options.Options.RecordFragment {
+		return // user made a choice; do not second-guess it
+	}
+	options.Options.RecordFragment = true
 }
 
 func NewClientWithOptions(options ClientOptions) (Config, error) {
 	if !options.Options.Enabled {
 		return nil, nil
 	}
+	// Before any engine sees the options, so REALITY and uTLS clients get the
+	// same default as the standard one.
+	applyDetourFragmentDefault(&options)
 	if !options.KTLSCompatible {
 		if options.Options.KernelTx {
 			options.Logger.Warn("enabling kTLS TX in current scenarios will definitely reduce performance, please checkout https://sing-box.sagernet.org/configuration/shared/tls/#kernel_tx")

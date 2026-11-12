@@ -83,14 +83,23 @@ func (c *UTLSClientConfig) STDConfig() (*STDConfig, error) {
 }
 
 func (c *UTLSClientConfig) Client(conn net.Conn) (Conn, error) {
-	if c.fragment || c.recordFragment {
-		conn = tf.NewConn(conn, c.ctx, c.fragment, c.recordFragment, c.fragmentFallbackDelay)
-	}
-	conn, err := applyTLSSpoof(conn, c.spoof, c.spoofMethod)
+	conn, err := c.wrapClientConn(conn)
 	if err != nil {
 		return nil, err
 	}
 	return &utlsALPNWrapper{utlsConnWrapper{utls.UClient(conn, c.config.Clone(), c.id)}, c.config.NextProtos}, nil
+}
+
+// wrapClientConn puts the ClientHello wrappers the config asked for around the
+// raw connection: tls `fragment` / `record_fragment`. It is the one place both
+// uTLS-based clients take them from — Client() here and the REALITY client,
+// which builds its UConn by hand and would otherwise silently ignore both
+// flags. Mirrors sing-box-lx SPEC 088.
+func (c *UTLSClientConfig) wrapClientConn(conn net.Conn) (net.Conn, error) {
+	if c.fragment || c.recordFragment {
+		conn = tf.NewConn(conn, c.ctx, c.fragment, c.recordFragment, c.fragmentFallbackDelay)
+	}
+	return applyTLSSpoof(conn, c.spoof, c.spoofMethod)
 }
 
 func (c *UTLSClientConfig) SetSessionIDGenerator(generator func(clientHello []byte, sessionID []byte) error) {

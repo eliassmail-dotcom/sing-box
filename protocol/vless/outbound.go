@@ -67,6 +67,11 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 			KTLSCompatible: common.PtrValueOrDefault(options.Transport).Type == "" &&
 				!common.PtrValueOrDefault(options.Multiplex).Enabled &&
 				options.Flow == "",
+			// Fragment the ClientHello by default when the leg is someone
+			// else's outbound: a PMTU black hole behind it is invisible to us
+			// and silently breaks the hybrid REALITY hello. Mirrors
+			// sing-box-lx SPEC 060.
+			DialedThroughDetour: tls.DialedThroughDetour(options.DialerOptions),
 		})
 		if err != nil {
 			return nil, err

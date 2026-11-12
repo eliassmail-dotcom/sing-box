@@ -198,3 +198,10 @@ require (
 	lukechampine.com/blake3 v1.3.0 // indirect
 	zombiezen.com/go/capnproto2 v2.18.2+incompatible // indirect
 )
+
+// Vendored fork of metacubex/utls v1.8.7 (sing-box-lx, submodules/utls):
+// carries X25519MLKEM768 with classical-key reuse in the Firefox 148 preset
+// (HelloFirefox_Auto), required by REALITY servers that expect a hybrid key
+// share. Same module path, drop-in replacement.
+replace github.com/metacubex/utls => ./third_party/utls
+
