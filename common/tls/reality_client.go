@@ -179,6 +179,39 @@ func (e *RealityClientConfig) ClientHandshake(ctx context.Context, conn net.Conn
 		}
 	}
 
+	// X25519 key reuse between the classical key_share entry and the hybrid
+	// X25519MLKEM768 entry. Stock utls generates independent X25519 keys for
+	// the two entries. REALITY servers derive the auth key from either share
+	// (pure X25519 if present, otherwise the trailing 32 bytes of the
+	// X25519MLKEM768 share), so with independent keys the session-id seal may
+	// fail to decrypt and the server silently proxies to the camouflage
+	// destination (observed as EOF or x509 errors). Overwrite the hybrid
+	// share's X25519 component with the classical key so both entries match,
+	// mirroring the sing-box-lx utls fork. The second BuildHandshakeState
+	// re-marshals the hello from the mutated extensions (the preset is
+	// applied once, keys are not regenerated).
+	if keyShareKeys := uConn.HandshakeState.State13.KeyShareKeys; keyShareKeys != nil &&
+		keyShareKeys.Ecdhe != nil && keyShareKeys.MlkemEcdhe != nil &&
+		keyShareKeys.Ecdhe != keyShareKeys.MlkemEcdhe {
+		const mlkem768EncapsulationKeySize = 1184
+		classicalPub := keyShareKeys.Ecdhe.PublicKey().Bytes()
+		for _, extension := range uConn.Extensions {
+			if keyShares, isKeyShares := extension.(*utls.KeyShareExtension); isKeyShares {
+				for i, share := range keyShares.KeyShares {
+					// X25519MLKEM768 share layout: ML-KEM-768 encapsulation key (1184 bytes) + X25519 public key (32 bytes)
+					if share.Group == utls.X25519MLKEM768 && len(share.Data) == mlkem768EncapsulationKeySize+32 {
+						copy(keyShares.KeyShares[i].Data[mlkem768EncapsulationKeySize:], classicalPub)
+					}
+				}
+			}
+		}
+		keyShareKeys.MlkemEcdhe = keyShareKeys.Ecdhe
+		err = uConn.BuildHandshakeState()
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if len(uConfig.NextProtos) > 0 {
 		for _, extension := range uConn.Extensions {
 			if alpnExtension, isALPN := extension.(*utls.ALPNExtension); isALPN {
@@ -220,7 +253,13 @@ func (e *RealityClientConfig) ClientHandshake(ctx context.Context, conn net.Conn
 	if keyShareKeys == nil {
 		return nil, E.New("nil KeyShareKeys")
 	}
+	// AuthKey must be computed from the same share the server picks: pure
+	// X25519 if present in the ClientHello, otherwise the X25519 part of
+	// X25519MLKEM768.
 	ecdheKey := keyShareKeys.Ecdhe
+	if ecdheKey == nil {
+		ecdheKey = keyShareKeys.MlkemEcdhe
+	}
 	if ecdheKey == nil {
 		return nil, E.New("nil ecdheKey")
 	}
