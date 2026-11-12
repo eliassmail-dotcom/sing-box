@@ -55,7 +55,8 @@ jobs:
         run: |-
           cd clients/apple/build
           mkdir -p Payload
-          cp -R SFI.xcarchive/Products/Applications/SFI.app Payload/
+          cp -R SFI.xcarchive/Products/Applications/*.app Payload/
+          ls Payload
           zip -qry SFI-mlkem-unsigned.ipa Payload
           ls -lh SFI-mlkem-unsigned.ipa
 
