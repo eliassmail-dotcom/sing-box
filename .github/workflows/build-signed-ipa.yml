@@ -70,10 +70,13 @@ jobs:
           ls -l "$CERTIFICATE_PATH"
           md5 -q "$CERTIFICATE_PATH"
           openssl pkcs12 -info -in "$CERTIFICATE_PATH" -passin "pass:$P12_PASSWORD" -noout
+          LEGACY_PATH=$RUNNER_TEMP/AppleDistribution.legacy.p12
+          openssl pkcs12 -in "$CERTIFICATE_PATH" -passin "pass:$P12_PASSWORD" -passout "pass:$P12_PASSWORD" -export -out "$LEGACY_PATH" -name "Apple Distribution"
+          openssl pkcs12 -info -in "$LEGACY_PATH" -passin "pass:$P12_PASSWORD" -noout
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security import "$LEGACY_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychains -d user -s "$KEYCHAIN_PATH"
           security default-keychain -d user -s "$KEYCHAIN_PATH"
