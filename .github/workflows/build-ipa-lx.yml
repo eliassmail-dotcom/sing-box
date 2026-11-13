@@ -47,6 +47,11 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: Dump CommandClientHandler protocol (diagnostic)
+        run: |-
+          grep -n -B2 -A20 'Protocol LibboxCommandClientHandlerProtocol' clients/apple/Libbox.xcframework/ios-arm64/Libbox.framework/Headers/Libbox.h || \
+            grep -n -A20 'LibboxCommandClientHandlerProtocol' clients/apple/Libbox.xcframework/ios-arm64/Libbox.framework/Headers/Libbox.h | head -60
+
       - name: Archive SFI (unsigned)
         run: |-
           cd clients/apple
