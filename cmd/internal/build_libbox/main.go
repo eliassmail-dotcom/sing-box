@@ -295,6 +295,8 @@ func buildApple() {
 	}
 
 	tags := append(sharedTags, darwinTags...)
+	// VPN-Config-LX-IOS-001: retain Clash API for existing JSON/UI; remove after CommandClient migration.
+	tags = append(tags, "with_clash_api")
 	//if withTailscale {
 	//	tags = append(tags, memcTags...)
 	//}
