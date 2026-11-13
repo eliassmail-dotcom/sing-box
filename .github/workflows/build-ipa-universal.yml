@@ -1,0 +1,73 @@
+name: Build SFI IPA (MLKEM universal, unsigned for any-certificate signing)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Libbox + SFI universal unsigned IPA
+    runs-on: xcode-27
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Checkout Apple client (submodule, universal branch)
+        run: |-
+          git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
+          git submodule update --init --recursive clients/apple
+          git -C clients/apple checkout mlkem-universal
+          git -C clients/apple rev-parse HEAD
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.10
+          cache: false
+
+      - name: Patch Go for iOS
+        run: .github/patch_go_for_ios.sh
+
+      - name: Build Libbox.xcframework (ios/arm64)
+        run: |-
+          make lib_install
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          git tag v1.14.4 -f
+          go run ./cmd/internal/build_libbox -target apple -platform ios/arm64
+          rm -rf clients/apple/Libbox.xcframework
+          cp -R Libbox.xcframework clients/apple/Libbox.xcframework
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Archive SFI (unsigned)
+        run: |-
+          cd clients/apple
+          rm -rf build/SFI.xcarchive
+          xcodebuild archive -skipPackagePluginValidation \
+            -scheme SFI -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/SFI.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+      - name: Package unsigned IPA (for any-certificate GBox signing)
+        run: |-
+          cd clients/apple/build
+          rm -rf Payload SFI-mlkem-universal-unsigned.ipa
+          mkdir Payload
+          cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
+          zip -qry SFI-mlkem-universal-unsigned.ipa Payload
+          ls -lh SFI-mlkem-universal-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SFI-mlkem-universal-unsigned-ipa
+          path: clients/apple/build/SFI-mlkem-universal-unsigned.ipa
+          compression-level: 1
