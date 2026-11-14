@@ -161,7 +161,7 @@ func slowerBy(delay, than uint16, num, den int) bool {
 
 // probeNow probes one node regardless of its history age (confirmation probe).
 func (g *URLTestGroup) probeNow(ctx context.Context, node adapter.Outbound) map[string]uint16 {
-	return urlTestOutbounds(ctx, g.outbound, g.history, g.logger, []adapter.Outbound{node}, g.link, 0, false, g.penaltyReset)
+	return urlTestOutboundsLinks(ctx, g.outbound, g.history, g.logger, []adapter.Outbound{node}, g.links, 0, false, g.penaltyReset)
 }
 
 // failoverSelect is the failover selection used by performSelectionUpdate.
