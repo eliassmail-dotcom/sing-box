@@ -15,6 +15,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/outbound"
 	"github.com/sagernet/sing-box/common/interrupt"
+	"github.com/sagernet/sing-box/common/lxtrace"
 	"github.com/sagernet/sing-box/common/urltest"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
@@ -57,6 +58,7 @@ type URLTest struct {
 	interruptExternalConnections bool
 	balancer                     *balancer // lx: SPEC 019 — nil for least_test (default)
 	failover                     bool      // lx: SPEC 116 — mode: failover
+	passiveGuard                 *lxPassiveGuard // opt-in LX reliability
 	priorityOutbounds            map[string]bool // LX: tier-1 groups used before other outbounds
 }
 
@@ -74,6 +76,7 @@ func NewURLTest(ctx context.Context, router adapter.Router, logger log.ContextLo
 	}
 	// lx: SPEC 116 — failover holds the working node until it fails.
 	failover := isFailoverMode(options)
+	if options.PassiveGuard && balancer != nil { return nil, E.New("urltest: passive_guard is not supported with round_robin") }
 	if options.TolerancePercent > 100 { return nil, E.New("urltest: tolerance_percent must be 0..100") }
 	if options.MinHold < 0 || time.Duration(options.MinHold) > 10*time.Minute { return nil, E.New("urltest: min_hold must be between 0 and 10m") }
 	if (failover || balancer != nil) && (options.TolerancePercent != 0 || options.MinHold != 0) { return nil, E.New("urltest: adaptive threshold and min_hold apply only to least_test") }
@@ -120,6 +123,7 @@ func NewURLTest(ctx context.Context, router adapter.Router, logger log.ContextLo
 		failover:                     failover,
 		priorityOutbounds:            primary,
 	}
+	if options.PassiveGuard { outbound.passiveGuard = newLXPassiveGuard() }
 	if len(outbound.tags) == 0 {
 		return nil, E.New("missing tags")
 	}
@@ -149,6 +153,7 @@ func (s *URLTest) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 		group.balancer = s.balancer // lx: SPEC 019 v2 — health-check drives the pool through it
 		group.groupTag = s.Tag()    // lx: SPEC 020 — probe gating needs the group's own tag
 		group.failover = s.failover // lx: SPEC 116
+		group.passiveGuard = s.passiveGuard
 		group.priorityOutbounds = s.priorityOutbounds // LX: preferred base groups before whitelist fallbacks
 		group.tolerancePercent = s.tolerancePercent
 		group.minHold = s.minHold
@@ -347,11 +352,21 @@ func (s *URLTest) DialContext(ctx context.Context, network string, destination M
 	if err != nil {
 		return nil, err
 	}
-	conn, err := outbound.DialContext(ctx, network, destination)
+	var conn net.Conn
+	if s.passiveGuard != nil && N.NetworkName(network) == N.NetworkTCP && !lxtrace.IsProbe(ctx) {
+		conn, err = s.group.guardDial(ctx, RealTag(outbound, N.NetworkTCP), func() (net.Conn, error) {
+			return outbound.DialContext(ctx, network, destination)
+		})
+	} else {
+		conn, err = outbound.DialContext(ctx, network, destination)
+	}
 	// lx:end chain
 	if err == nil {
 		if s.balancer == nil {
 			s.group.penaltyResetOnDial(ctx, RealTag(outbound, N.NetworkTCP)) // lx: SPEC 054 — успех = доказательство жизни; SPEC 139 — not for a probe
+		}
+		if s.passiveGuard != nil && N.NetworkName(network) == N.NetworkTCP && !lxtrace.IsProbe(ctx) {
+			conn = s.group.guardedConn(RealTag(outbound, N.NetworkTCP), conn)
 		}
 		return s.group.interruptGroup.NewConn(conn, interrupt.IsExternalConnectionFromContext(ctx)), nil
 	}
@@ -365,6 +380,9 @@ func (s *URLTest) DialContext(ctx context.Context, network string, destination M
 		// переносит выбор группы на fallback (без Interrupt).
 		if fbConn, fallback, ok := s.group.penaltyFailoverDial(ctx, N.NetworkName(network), destination, outbound, err); ok {
 			s.logger.InfoContext(ctx, "lx penalty: failover to ", fallback.Tag())
+			if s.passiveGuard != nil && N.NetworkName(network) == N.NetworkTCP && !lxtrace.IsProbe(ctx) {
+				fbConn = s.group.guardedConn(RealTag(fallback, N.NetworkTCP), fbConn)
+			}
 			return s.group.interruptGroup.NewConn(fbConn, interrupt.IsExternalConnectionFromContext(ctx)), nil
 		}
 	}
@@ -438,6 +456,7 @@ type URLTestGroup struct {
 	groupTag                     string                    // lx: SPEC 020 — set by URLTest.Start (probe gating)
 	failover                     bool                      // lx: SPEC 116 — set by URLTest.Start
 	priorityOutbounds            map[string]bool           // LX: tags of preferred group outbounds
+	passiveGuard                 *lxPassiveGuard // LX: opt-in diagnostics
 	lastTickRunEnd               atomic.Int64              // lx: SPEC 125 — end of the last non-forced probe run, UnixNano
 	failoverSlow                 atomic.Pointer[tagSet]    // lx: SPEC 126 — confirmed-slow held tags during a failover reselect
 	reachability                 adapter.ReachabilityReporter
@@ -551,14 +570,14 @@ func (g *URLTestGroup) Select(network string) (adapter.Outbound, bool) {
 	selectedTCP, selectedUDP := g.selectedLx() // lx: SPEC 139
 	switch network {
 	case N.NetworkTCP:
-		if selectedTCP != nil {
+		if selectedTCP != nil && g.guardAllows(RealTag(selectedTCP, network)) {
 			if history := g.history.LoadURLTestHistory(RealTag(selectedTCP, N.NetworkTCP)); history != nil {
 				minOutbound = selectedTCP
 				minDelay = history.Delay
 			}
 		}
 	case N.NetworkUDP:
-		if selectedUDP != nil {
+		if selectedUDP != nil && g.guardAllows(RealTag(selectedUDP, network)) {
 			if history := g.history.LoadURLTestHistory(RealTag(selectedUDP, N.NetworkUDP)); history != nil {
 				minOutbound = selectedUDP
 				minDelay = history.Delay
@@ -567,7 +586,7 @@ func (g *URLTestGroup) Select(network string) (adapter.Outbound, bool) {
 	}
 	if minOutbound != nil && g.holdSelected(network, minOutbound) { return minOutbound, true }
 	for _, detour := range g.outbounds {
-		if !common.Contains(detour.Network(), network) {
+		if !common.Contains(detour.Network(), network) || !g.guardAllows(RealTag(detour, network)) {
 			continue
 		}
 		history := g.history.LoadURLTestHistory(RealTag(detour, network))
@@ -581,7 +600,7 @@ func (g *URLTestGroup) Select(network string) (adapter.Outbound, bool) {
 	}
 	if minOutbound == nil {
 		for _, detour := range g.outbounds {
-			if !common.Contains(detour.Network(), network) {
+			if !common.Contains(detour.Network(), network) || !g.guardAllows(RealTag(detour, network)) {
 				continue
 			}
 			return detour, false
@@ -604,7 +623,7 @@ func (g *URLTestGroup) selectPriority(network string) (adapter.Outbound, bool) {
 	choose := func(preferred bool) (adapter.Outbound, bool) {
 		var best adapter.Outbound
 		var bestDelay uint16
-		if current != nil && g.priorityOutbounds[current.Tag()] == preferred {
+		if current != nil && g.priorityOutbounds[current.Tag()] == preferred && g.guardAllows(RealTag(current, network)) {
 			if supportsNetwork(current, network) {
 				if history := g.history.LoadURLTestHistory(RealTag(current, network)); history != nil {
 					best, bestDelay = current, history.Delay
@@ -613,7 +632,7 @@ func (g *URLTestGroup) selectPriority(network string) (adapter.Outbound, bool) {
 			}
 		}
 		for _, detour := range g.outbounds {
-			if g.priorityOutbounds[detour.Tag()] != preferred || !supportsNetwork(detour, network) {
+			if g.priorityOutbounds[detour.Tag()] != preferred || !supportsNetwork(detour, network) || !g.guardAllows(RealTag(detour, network)) {
 				continue
 			}
 			history := g.history.LoadURLTestHistory(RealTag(detour, network))
@@ -630,7 +649,7 @@ func (g *URLTestGroup) selectPriority(network string) (adapter.Outbound, bool) {
 	if best, ok := choose(false); ok { return best, true }
 	for _, preferred := range []bool{true, false} {
 		for _, detour := range g.outbounds {
-			if g.priorityOutbounds[detour.Tag()] == preferred && supportsNetwork(detour, network) {
+			if g.priorityOutbounds[detour.Tag()] == preferred && supportsNetwork(detour, network) && g.guardAllows(RealTag(detour, network)) {
 				return detour, false
 			}
 		}
@@ -715,6 +734,13 @@ func (g *URLTestGroup) urlTest(ctx context.Context, force bool) (map[string]uint
 // and the round_robin pool paths; upstream's nested-group-aware batch (66beaf541) with the
 // SPEC 054 hook: a probe answer is proof of life and resets the node's penalties.
 func (g *URLTestGroup) testNodes(ctx context.Context, outbounds []adapter.Outbound, force bool) map[string]uint16 {
+	if g.passiveGuard != nil && !force {
+		eligible := make([]adapter.Outbound, 0, len(outbounds))
+		for _, node := range outbounds {
+			if g.guardAllows(RealTag(node, N.NetworkTCP)) { eligible = append(eligible, node) }
+		}
+		outbounds = eligible
+	}
 	if !force { // lx: SPEC 125 — freshness from the previous tick run, not a fixed interval
 		return g.testNodesTick(ctx, outbounds)
 	}
