@@ -416,6 +416,7 @@ type URLTestGroup struct {
 	minHold                      time.Duration
 	lastSwitchTCP                atomic.Int64 // successful selection-change time (UnixNano)
 	lastSwitchUDP                atomic.Int64
+	manualHold                   atomic.Pointer[lxManualHold] // user-initiated next-node hold, scoped to leaf tag
 	interval                     time.Duration
 	tolerance                    uint16
 	idleTimeout                  time.Duration
