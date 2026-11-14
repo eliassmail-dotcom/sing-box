@@ -21,7 +21,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Init submodules (Apple client from our fork, branch lx)
+      - name: Init submodules (Apple client from feature/lx-runtime-settings)
         run: |-
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
@@ -103,12 +103,12 @@ jobs:
           rm -rf Payload SFI-lx-runtime-settings-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
-          zip -qry SFI-lx-v1-unsigned.ipa Payload
-          ls -lh SFI-lx-v1-unsigned.ipa
+          zip -qry SFI-lx-runtime-settings-unsigned.ipa Payload
+          ls -lh SFI-lx-runtime-settings-unsigned.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: SFI-lx-runtime-settings-unsigned-ipa
-          path: clients/apple/build/SFI-lx-v1-unsigned.ipa
+          path: clients/apple/build/SFI-lx-runtime-settings-unsigned.ipa
           compression-level: 1
