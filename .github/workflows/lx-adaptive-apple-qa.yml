@@ -1,9 +1,7 @@
 name: LX adaptive health iOS simulator QA
 
 on:
-  push:
-    branches:
-      - feature/lx-adaptive-health
+  # Manual only: user requested no new iOS build while implementing node rotation.
   workflow_dispatch:
 
 permissions:
