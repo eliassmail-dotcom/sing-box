@@ -15,6 +15,11 @@ import (
     N "github.com/sagernet/sing/common/network"
 )
 
+func (g *URLTestGroup) probeLinks() []string {
+    if len(g.links) > 0 { return g.links }
+    return []string{g.link}
+}
+
 func (g *URLTestGroup) fasterEnough(current, candidate uint16) bool {
     if current == 0 { return true }
     if candidate >= current { return false }
