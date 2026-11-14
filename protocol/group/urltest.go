@@ -884,7 +884,7 @@ func (g *URLTestGroup) performSelectionUpdate(reselect bool) {
 	)
 	// lx: SPEC 054 — переизбор с учётом штрафов (в аварийном режиме — штрафы ↑, задержка ↑).
 	// lx: SPEC 116 — failover держит текущий узел (selectForUpdate).
-	if outbound, exists := g.selectForUpdate(N.NetworkTCP, reselect); outbound != nil && (g.selectedOutboundTCP == nil || (exists && outbound != g.selectedOutboundTCP)) {
+	if outbound, exists := g.selectForUpdate(N.NetworkTCP, reselect); outbound != nil && (g.selectedOutboundTCP == nil || ((exists || !g.guardAllows(RealTag(g.selectedOutboundTCP, N.NetworkTCP))) && outbound != g.selectedOutboundTCP)) {
 		if g.selectedOutboundTCP != nil {
 			updated = true
 		}
@@ -895,7 +895,7 @@ func (g *URLTestGroup) performSelectionUpdate(reselect bool) {
 		g.setSelectedTCPLx(outbound) // lx: SPEC 139
 		selected = true
 	}
-	if outbound, exists := g.selectForUpdate(N.NetworkUDP, reselect); outbound != nil && (g.selectedOutboundUDP == nil || (exists && outbound != g.selectedOutboundUDP)) {
+	if outbound, exists := g.selectForUpdate(N.NetworkUDP, reselect); outbound != nil && (g.selectedOutboundUDP == nil || ((exists || !g.guardAllows(RealTag(g.selectedOutboundUDP, N.NetworkUDP))) && outbound != g.selectedOutboundUDP)) {
 		if g.selectedOutboundUDP != nil {
 			updated = true
 		}
