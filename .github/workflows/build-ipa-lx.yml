@@ -1,9 +1,9 @@
-name: Build SFI IPA (LX runtime settings test, unsigned)
+name: Build SFI IPA (priority base to whites, unsigned)
 
 on:
   push:
     branches:
-      - ci/lx-runtime-settings
+      - feature/priority-white-fallback
   workflow_dispatch:
 
 permissions:
@@ -26,8 +26,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin feature/lx-runtime-settings
-          git -C clients/apple checkout --detach 82dd4d1aefab5b34bbbec9236c89cddfb28e159e
-          test "$(git -C clients/apple rev-parse HEAD)" = "82dd4d1aefab5b34bbbec9236c89cddfb28e159e"
+          git -C clients/apple checkout --detach 672097059d7a0743056162645856acc423d09be5
+          test "$(git -C clients/apple rev-parse HEAD)" = "672097059d7a0743056162645856acc423d09be5"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -39,6 +39,10 @@ jobs:
 
       - name: Patch Go for iOS
         run: .github/patch_go_for_ios.sh
+
+      - name: Test LX base-to-whitelist priority fallback
+        run: |-
+          go test ./protocol/group -run '^TestPriorityFallback_' -count=1 -timeout=8m
 
       - name: Build Libbox.xcframework (ios/arm64 + simulator, with_clash_api via integration patch)
         run: |-

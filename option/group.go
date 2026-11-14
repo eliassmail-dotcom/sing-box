@@ -18,6 +18,10 @@ type URLTestOutboundOptions struct {
 	// lx: SPEC 019 v2 — load-balancing.
 	Mode     string                  `json:"mode,omitempty"` // least_test (default) | round_robin | failover
 	Balancer *URLTestBalancerOptions `json:"balancer,omitempty"`
+	// LX: Prefer the listed group tags whenever they have successful URL-test history.
+	// This enables ordered base -> whitelist fallback with automatic recovery.
+	// Valid only in least_test mode; tags must also be present in outbounds.
+	PriorityOutbounds []string `json:"priority_outbounds,omitempty" reference:"outbound"`
 }
 
 // URLTestBalancerOptions configures round_robin: a fixed-size pool of live nodes, lazily
