@@ -15,6 +15,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
+        with:
+          submodules: recursive
       - name: Use pinned Go version
         id: pin
         run: echo "go_version=$(sed 's/^go//' go.version | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
