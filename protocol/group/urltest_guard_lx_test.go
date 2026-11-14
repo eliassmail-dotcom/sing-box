@@ -35,7 +35,7 @@ func TestLXGuardNeedsIndependentEvidence(t *testing.T) {
 	now := time.Unix(100, 0)
 	g := newLXPassiveGuard()
 	g.now = func() time.Time { return now }
-	for _, site := range []string{"s1","s2","s3","s4","s5","s6"} {
+	for _, site := range []string{"s1", "s2", "s3", "s4", "s5", "s6"} {
 		if g.record("a", false, site) {
 			t.Fatal("passive stream stalls alone must never quarantine")
 		}
@@ -100,7 +100,9 @@ func TestLXGuardSuspectGateRespectsContext(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		release2, err := g.enter(context.Background(), "a")
-		if err == nil { release2() }
+		if err == nil {
+			release2()
+		}
 	}()
 	wg.Wait()
 	now = now.Add(lxGuardWindow + time.Second)
@@ -137,7 +139,9 @@ func TestLXGuardSelectionSkipsQuarantine(t *testing.T) {
 	if got := g.pickForDialNode(N.NetworkTCP); got != a {
 		t.Fatalf("preferred node should win while healthy: %v", got)
 	}
-	for _, site := range []string{"site1","site2","site3"} { g.passiveGuard.record("base", true, site) }
+	for _, site := range []string{"site1", "site2", "site3"} {
+		g.passiveGuard.record("base", true, site)
+	}
 	if got := g.pickForDialNode(N.NetworkTCP); got != b {
 		t.Fatalf("quarantined preferred node must yield to fallback: %v", got)
 	}
@@ -155,7 +159,9 @@ func TestLXGuardColdStartSkipsQuarantinedNode(t *testing.T) {
 	g.failover = false
 	g.passiveGuard = newLXPassiveGuard()
 	g.setSelectedTCPLx(a)
-	for _, site := range []string{"site1","site2","site3"} { g.passiveGuard.record("a", true, site) }
+	for _, site := range []string{"site1", "site2", "site3"} {
+		g.passiveGuard.record("a", true, site)
+	}
 	// No URLTest history for either node. The old cached selection must not win.
 	if got := g.pickForDialNode(N.NetworkTCP); got != b {
 		t.Fatalf("cold start must choose non-quarantined fallback: %v", got)
