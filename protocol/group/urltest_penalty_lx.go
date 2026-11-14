@@ -278,7 +278,7 @@ func (g *URLTestGroup) penaltyFailoverDial(ctx context.Context, network string, 
 	}
  	var conn net.Conn
 	if !probe && network == N.NetworkTCP && g.passiveGuard != nil {
-		conn, err = g.guardDial(ctx, RealTag(fallback, N.NetworkTCP), func() (net.Conn, error) {
+		conn, err = g.guardDial(ctx, RealTag(fallback, N.NetworkTCP), destination.String(), func() (net.Conn, error) {
 			return fallbackDialer.DialContext(ctx, network, destination)
 		})
 	} else {
