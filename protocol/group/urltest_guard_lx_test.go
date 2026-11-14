@@ -16,13 +16,13 @@ func TestLXGuardThreeHardFailures(t *testing.T) {
 	now := time.Unix(100, 0)
 	g := newLXPassiveGuard()
 	g.now = func() time.Time { return now }
-	if g.record("a", true) || g.record("a", true) {
+	if g.record("a", true, "site1") || g.record("a", true, "site2") {
 		t.Fatal("one or two failures must not quarantine")
 	}
-	if !g.record("a", true) || !g.blocked("a") {
+	if !g.record("a", true, "site3") || !g.blocked("a") {
 		t.Fatal("third failure must start quarantine")
 	}
-	if g.blocked("b") || g.record("a", true) {
+	if g.blocked("b") || g.record("a", true, "site4") {
 		t.Fatal("quarantine must be per node and not restart on each failure")
 	}
 	now = now.Add(lxGuardQuarantine + time.Nanosecond)
@@ -35,12 +35,12 @@ func TestLXGuardNeedsIndependentEvidence(t *testing.T) {
 	now := time.Unix(100, 0)
 	g := newLXPassiveGuard()
 	g.now = func() time.Time { return now }
-	for i := 0; i < 6; i++ {
-		if g.record("a", false) {
+	for _, site := range []string{"s1","s2","s3","s4","s5","s6"} {
+		if g.record("a", false, site) {
 			t.Fatal("passive stream stalls alone must never quarantine")
 		}
 	}
-	if !g.record("a", true) {
+	if !g.record("a", true, "site7") {
 		t.Fatal("two separate stalls and one hard failure should confirm quarantine")
 	}
 }
@@ -49,17 +49,17 @@ func TestLXGuardWindowAndSuccess(t *testing.T) {
 	now := time.Unix(100, 0)
 	g := newLXPassiveGuard()
 	g.now = func() time.Time { return now }
-	g.record("a", true)
-	g.record("a", true)
+	g.record("a", true, "site1")
+	g.record("a", true, "site2")
 	now = now.Add(lxGuardWindow + time.Second)
-	if g.record("a", true) {
+	if g.record("a", true, "site3") {
 		t.Fatal("old evidence must expire")
 	}
 	g.success("a")
-	if g.record("a", true) || g.record("a", true) {
+	if g.record("a", true, "site4") || g.record("a", true, "site5") {
 		t.Fatal("success must clear tentative hard failures")
 	}
-	if !g.record("a", true) {
+	if !g.record("a", true, "site6") {
 		t.Fatal("a fresh set of failures must quarantine")
 	}
 	g.success("a")
@@ -68,11 +68,23 @@ func TestLXGuardWindowAndSuccess(t *testing.T) {
 	}
 }
 
+func TestLXGuardDoesNotQuarantineOnOneBrokenSite(t *testing.T) {
+	g := newLXPassiveGuard()
+	for i := 0; i < 100; i++ {
+		if g.record("node", true, "broken.example:443") {
+			t.Fatal("repeated attempts to a single destination must not quarantine the proxy")
+		}
+	}
+	if g.blocked("node") {
+		t.Fatal("one broken website must not affect the entire node")
+	}
+}
+
 func TestLXGuardSuspectGateRespectsContext(t *testing.T) {
 	now := time.Unix(100, 0)
 	g := newLXPassiveGuard()
 	g.now = func() time.Time { return now }
-	g.record("a", true)
+	g.record("a", true, "site1")
 	release, err := g.enter(context.Background(), "a")
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +137,7 @@ func TestLXGuardSelectionSkipsQuarantine(t *testing.T) {
 	if got := g.pickForDialNode(N.NetworkTCP); got != a {
 		t.Fatalf("preferred node should win while healthy: %v", got)
 	}
-	for i := 0; i < 3; i++ { g.passiveGuard.record("base", true) }
+	for _, site := range []string{"site1","site2","site3"} { g.passiveGuard.record("base", true, site) }
 	if got := g.pickForDialNode(N.NetworkTCP); got != b {
 		t.Fatalf("quarantined preferred node must yield to fallback: %v", got)
 	}
@@ -143,7 +155,7 @@ func TestLXGuardColdStartSkipsQuarantinedNode(t *testing.T) {
 	g.failover = false
 	g.passiveGuard = newLXPassiveGuard()
 	g.setSelectedTCPLx(a)
-	for i := 0; i < 3; i++ { g.passiveGuard.record("a", true) }
+	for _, site := range []string{"site1","site2","site3"} { g.passiveGuard.record("a", true, site) }
 	// No URLTest history for either node. The old cached selection must not win.
 	if got := g.pickForDialNode(N.NetworkTCP); got != b {
 		t.Fatalf("cold start must choose non-quarantined fallback: %v", got)
