@@ -86,8 +86,23 @@ func (g *lxPassiveGuard) record(tag string, hard bool, target string) bool {
 	if now.Before(n.blockedUntil) {
 		return false
 	}
-	if len(n.hardFailures) < 3 && (len(n.hardFailures) == 0 || len(n.streamStalls) < 2) {
-		return false
+	if len(n.hardFailures) < 3 {
+		if len(n.hardFailures) == 0 || len(n.streamStalls) < 2 {
+			return false
+		}
+		// Two stalled destinations and one hard-failing destination must
+		// identify THREE distinct targets; double-reporting one website
+		// is not independent evidence of a bad VPN path.
+		unique := make(map[string]struct{}, len(n.hardFailures)+len(n.streamStalls))
+		for target := range n.streamStalls {
+			unique[target] = struct{}{}
+		}
+		for target := range n.hardFailures {
+			unique[target] = struct{}{}
+		}
+		if len(unique) < 3 {
+			return false
+		}
 	}
 	n.blockedUntil = now.Add(lxGuardQuarantine)
 	n.hardFailures = nil

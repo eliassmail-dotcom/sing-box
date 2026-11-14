@@ -45,6 +45,20 @@ func TestLXGuardNeedsIndependentEvidence(t *testing.T) {
 	}
 }
 
+func TestLXGuardOverlappingDestinationEvidenceDoesNotQuarantine(t *testing.T) {
+	g := newLXPassiveGuard()
+	g.record("a", false, "site1")
+	g.record("a", false, "site2")
+	// A hard error on the SAME site must not count as a third
+	// independent destination.
+	if g.record("a", true, "site2") || g.blocked("a") {
+		t.Fatal("overlapping stream and dial observations must not quarantine")
+	}
+	if !g.record("a", true, "site3") {
+		t.Fatal("third independent site should complete the evidence threshold")
+	}
+}
+
 func TestLXGuardWindowAndSuccess(t *testing.T) {
 	now := time.Unix(100, 0)
 	g := newLXPassiveGuard()

@@ -104,7 +104,7 @@ func (g *URLTestGroup) cycleNode(depth int) (string, error) {
 			continue
 		}
 		realTag := RealTag(node, N.NetworkTCP)
-		if realTag == "" || seen[realTag] {
+		if realTag == "" || !g.guardAllows(realTag) || seen[realTag] {
 			continue
 		}
 		history := g.history.LoadURLTestHistory(realTag)
