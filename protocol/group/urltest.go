@@ -354,7 +354,7 @@ func (s *URLTest) DialContext(ctx context.Context, network string, destination M
 	}
 	var conn net.Conn
 	if s.passiveGuard != nil && N.NetworkName(network) == N.NetworkTCP && !lxtrace.IsProbe(ctx) {
-		conn, err = s.group.guardDial(ctx, RealTag(outbound, N.NetworkTCP), func() (net.Conn, error) {
+		conn, err = s.group.guardDial(ctx, RealTag(outbound, N.NetworkTCP), destination.String(), func() (net.Conn, error) {
 			return outbound.DialContext(ctx, network, destination)
 		})
 	} else {
@@ -366,7 +366,7 @@ func (s *URLTest) DialContext(ctx context.Context, network string, destination M
 			s.group.penaltyResetOnDial(ctx, RealTag(outbound, N.NetworkTCP)) // lx: SPEC 054 — успех = доказательство жизни; SPEC 139 — not for a probe
 		}
 		if s.passiveGuard != nil && N.NetworkName(network) == N.NetworkTCP && !lxtrace.IsProbe(ctx) {
-			conn = s.group.guardedConn(RealTag(outbound, N.NetworkTCP), conn)
+			conn = s.group.guardedConn(RealTag(outbound, N.NetworkTCP), destination.String(), conn)
 		}
 		return s.group.interruptGroup.NewConn(conn, interrupt.IsExternalConnectionFromContext(ctx)), nil
 	}
@@ -381,7 +381,7 @@ func (s *URLTest) DialContext(ctx context.Context, network string, destination M
 		if fbConn, fallback, ok := s.group.penaltyFailoverDial(ctx, N.NetworkName(network), destination, outbound, err); ok {
 			s.logger.InfoContext(ctx, "lx penalty: failover to ", fallback.Tag())
 			if s.passiveGuard != nil && N.NetworkName(network) == N.NetworkTCP && !lxtrace.IsProbe(ctx) {
-				fbConn = s.group.guardedConn(RealTag(fallback, N.NetworkTCP), fbConn)
+				fbConn = s.group.guardedConn(RealTag(fallback, N.NetworkTCP), destination.String(), fbConn)
 			}
 			return s.group.interruptGroup.NewConn(fbConn, interrupt.IsExternalConnectionFromContext(ctx)), nil
 		}
