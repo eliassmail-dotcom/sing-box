@@ -26,8 +26,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin feature/lx-adaptive-health-ui
-          git -C clients/apple checkout --detach 10ffec85be55ada9dab4ddc9efcdb5b6c9a89851
-          test "$(git -C clients/apple rev-parse HEAD)" = "10ffec85be55ada9dab4ddc9efcdb5b6c9a89851"
+          git -C clients/apple checkout --detach acc55b3dbdd9f4ea331374e703b6ff9b558bb893
+          test "$(git -C clients/apple rev-parse HEAD)" = "acc55b3dbdd9f4ea331374e703b6ff9b558bb893"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
