@@ -863,9 +863,9 @@ func (g *URLTestGroup) performSelectionUpdate(reselect bool) {
 		}
 		if outbound != g.selectedOutboundTCP {
 			changed = true
+			g.noteSelectionChange(N.NetworkTCP)
 		}
 		g.setSelectedTCPLx(outbound) // lx: SPEC 139
-		if changed { g.noteSelectionChange(N.NetworkTCP) }
 		selected = true
 	}
 	if outbound, exists := g.selectForUpdate(N.NetworkUDP, reselect); outbound != nil && (g.selectedOutboundUDP == nil || (exists && outbound != g.selectedOutboundUDP)) {
@@ -874,9 +874,9 @@ func (g *URLTestGroup) performSelectionUpdate(reselect bool) {
 		}
 		if outbound != g.selectedOutboundUDP {
 			changed = true
+			g.noteSelectionChange(N.NetworkUDP)
 		}
 		g.setSelectedUDPLx(outbound) // lx: SPEC 139
-		if changed { g.noteSelectionChange(N.NetworkUDP) }
 		selected = true
 	}
 	if updated {
