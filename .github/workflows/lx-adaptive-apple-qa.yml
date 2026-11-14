@@ -1,4 +1,4 @@
-name: LX Local Generator iOS unsigned IPA
+name: LX Local Generator + friend-profile coexistence unsigned IPA
 
 on:
   push:
@@ -26,8 +26,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin feature/lx-adaptive-health-ui
-          git -C clients/apple checkout --detach 58e28d0c874b8ff4bfcfac25b90bff4ffaab56db
-          test "$(git -C clients/apple rev-parse HEAD)" = "58e28d0c874b8ff4bfcfac25b90bff4ffaab56db"
+          git -C clients/apple checkout --detach 24ad23e74db781f1482b68b63e90787d23cd2609
+          test "$(git -C clients/apple rev-parse HEAD)" = "24ad23e74db781f1482b68b63e90787d23cd2609"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
