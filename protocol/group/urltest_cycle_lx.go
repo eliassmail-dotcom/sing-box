@@ -32,6 +32,11 @@ var (
 	ErrLXNotRunning = errors.New("URLTest group is not running")
 )
 
+type lxManualHold struct {
+	tag string
+	until time.Time
+}
+
 type lxCycleCandidate struct {
 	node adapter.Outbound
 	realTag string
@@ -144,7 +149,7 @@ func (g *URLTestGroup) cycleNode(depth int) (string, error) {
 		g.setSelectedUDPLx(next.node)
 		g.noteSelectionChange(N.NetworkUDP)
 	}
-	g.manualHoldUntil.Store(time.Now().Add(lxManualNodeHold).UnixNano())
+	g.manualHold.Store(&lxManualHold{tag: next.realTag, until: time.Now().Add(lxManualNodeHold)})
 	g.logger.Info("lx manual next node: ", currentRealTag, " -> ", next.realTag)
 	// Refresh the reachability graph and UI. Do not interrupt live streams.
 	invalidateReachability(g.ctx)
