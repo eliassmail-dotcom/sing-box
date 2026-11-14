@@ -21,26 +21,26 @@ import (
 const (
 	// LXNextNodeTag is reserved for SelectOutbound RPC when groupTag names an
 	// LX URLTest (the RPC's existing protobuf fields remain unchanged).
-	LXNextNodeTag = "__lx_next_node__"
+	LXNextNodeTag    = "__lx_next_node__"
 	lxManualNodeHold = 30 * time.Second
-	lxCycleMaxDepth = 12
+	lxCycleMaxDepth  = 12
 )
 
 var (
 	ErrLXNoAlternative = errors.New("no other healthy node in the selected mode")
-	ErrLXRoundRobin = errors.New("round_robin assigns nodes per connection; manual node change is unavailable")
-	ErrLXNotRunning = errors.New("URLTest group is not running")
+	ErrLXRoundRobin    = errors.New("round_robin assigns nodes per connection; manual node change is unavailable")
+	ErrLXNotRunning    = errors.New("URLTest group is not running")
 )
 
 type lxManualHold struct {
-	tag string
+	tag   string
 	until time.Time
 }
 
 type lxCycleCandidate struct {
-	node adapter.Outbound
+	node    adapter.Outbound
 	realTag string
-	delay uint16
+	delay   uint16
 	penalty int64
 }
 
@@ -125,8 +125,12 @@ func (g *URLTestGroup) cycleNode(depth int) (string, error) {
 	// then ascending RTT, then the tag. Repeated taps walk beyond #2.
 	sort.SliceStable(candidates, func(i, j int) bool {
 		a, b := candidates[i], candidates[j]
-		if a.penalty != b.penalty { return a.penalty < b.penalty }
-		if a.delay != b.delay { return a.delay < b.delay }
+		if a.penalty != b.penalty {
+			return a.penalty < b.penalty
+		}
+		if a.delay != b.delay {
+			return a.delay < b.delay
+		}
 		return a.realTag < b.realTag
 	})
 	currentIndex := -1
