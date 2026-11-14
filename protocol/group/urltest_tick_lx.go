@@ -32,7 +32,7 @@ func (g *URLTestGroup) testNodesTick(ctx context.Context, outbounds []adapter.Ou
 		lastEnd = time.Unix(0, nanos)
 	}
 	window := tickFreshWindow(g.interval, lastEnd, time.Now())
-	result := urlTestOutbounds(ctx, g.outbound, g.history, g.logger, outbounds, g.link, window, false, g.penaltyReset)
+	result := urlTestOutboundsLinks(ctx, g.outbound, g.history, g.logger, outbounds, g.links, window, false, g.penaltyReset)
 	g.lastTickRunEnd.Store(time.Now().UnixNano())
 	return result
 }
