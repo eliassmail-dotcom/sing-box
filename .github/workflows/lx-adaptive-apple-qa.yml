@@ -1,7 +1,9 @@
-name: LX adaptive health iOS simulator QA
+name: Build sing-box lx++ Reliability + Next Node unsigned IPA
 
 on:
-  # Manual only: user requested no new iOS build while implementing node rotation.
+  push:
+    branches:
+      - feature/lx-adaptive-health
   workflow_dispatch:
 
 permissions:
@@ -19,13 +21,13 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Init submodules (Apple client from feature/lx-runtime-settings)
+      - name: Init submodules (Apple client pinned to current LX features)
         run: |-
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin feature/lx-adaptive-health-ui
-          git -C clients/apple checkout --detach acc55b3dbdd9f4ea331374e703b6ff9b558bb893
-          test "$(git -C clients/apple rev-parse HEAD)" = "acc55b3dbdd9f4ea331374e703b6ff9b558bb893"
+          git -C clients/apple checkout --detach 6573cef9e69cc77f110f4aede1d198f21eda6237
+          test "$(git -C clients/apple rev-parse HEAD)" = "6573cef9e69cc77f110f4aede1d198f21eda6237"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -90,3 +92,29 @@ jobs:
           fi
           exit $STATUS
 
+
+      - name: Archive SFI (unsigned)
+        run: |-
+          cd clients/apple
+          rm -rf build/SFI.xcarchive
+          xcodebuild archive -skipPackagePluginValidation \
+            -scheme SFI -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/SFI.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+      - name: Package unsigned IPA (for GBox signing)
+        run: |-
+          cd clients/apple/build
+          rm -rf Payload SFI-lx-reliability-next-node-unsigned.ipa
+          mkdir Payload
+          cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
+          zip -qry SFI-lx-reliability-next-node-unsigned.ipa Payload
+          ls -lh SFI-lx-reliability-next-node-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SFI-lx-reliability-next-node-unsigned-ipa
+          path: clients/apple/build/SFI-lx-reliability-next-node-unsigned.ipa
+          compression-level: 1
