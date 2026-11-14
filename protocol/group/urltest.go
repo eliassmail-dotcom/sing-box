@@ -717,7 +717,7 @@ func (g *URLTestGroup) testNodes(ctx context.Context, outbounds []adapter.Outbou
 	if !force { // lx: SPEC 125 — freshness from the previous tick run, not a fixed interval
 		return g.testNodesTick(ctx, outbounds)
 	}
-	return urlTestOutboundsLinks(ctx, g.outbound, g.history, g.logger, outbounds, g.links, g.interval, force, g.penaltyReset)
+	return urlTestOutboundsLinks(ctx, g.outbound, g.history, g.logger, outbounds, g.probeLinks(), g.interval, force, g.penaltyReset)
 }
 
 type urlTestResult struct {
