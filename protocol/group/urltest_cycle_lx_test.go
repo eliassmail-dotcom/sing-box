@@ -65,6 +65,26 @@ func TestLXCycleNoHealthyAlternative(t *testing.T) {
 	}
 }
 
+func TestLXCycleAvoidsQuarantinedAlternative(t *testing.T) {
+	a, b := newFailoverNode("a", 0), newFailoverNode("b", 0)
+	g := newFailoverTestGroup(t, a, b)
+	g.failover = false
+	g.passiveGuard = newLXPassiveGuard()
+	g.setSelectedTCPLx(a)
+	lxAlive(g, "a", 60)
+	lxAlive(g, "b", 40)
+	for _, site := range []string{"site1", "site2", "site3"} {
+		g.passiveGuard.record("b", true, site)
+	}
+	_, err := g.cycleNode(0)
+	if !errors.Is(err, ErrLXNoAlternative) {
+		t.Fatalf("manual next-node must not select quarantined leaf: %v", err)
+	}
+	if selected, _ := g.selectedLx(); selected != a {
+		t.Fatal("manual cycling altered the working leaf")
+	}
+}
+
 func TestLXCycleDeadCurrentToOnlyLiveAlternative(t *testing.T) {
 	dead, alive := newFailoverNode("dead", 0), newFailoverNode("alive", 0)
 	g := newFailoverTestGroup(t, dead, alive)
