@@ -52,6 +52,25 @@ jobs:
           grep -n -B2 -A20 'Protocol LibboxCommandClientHandlerProtocol' clients/apple/Libbox.xcframework/ios-arm64/Libbox.framework/Headers/Libbox.h || \
             grep -n -A20 'LibboxCommandClientHandlerProtocol' clients/apple/Libbox.xcframework/ios-arm64/Libbox.framework/Headers/Libbox.h | head -60
 
+      - name: Run SFUnitTests (iOS simulator)
+        run: |-
+          SIM=$(xcrun simctl list devices available -j | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)
+          for dev in d['devices'].values():
+              for x in dev:
+                  if x['isAvailable'] and x['name'].startswith('iPhone'):
+                      print(x['name']); raise SystemExit
+          sys.exit(1)
+          ")
+          echo "Using simulator: $SIM"
+          cd clients/apple
+          xcodebuild test -skipPackagePluginValidation \
+            -scheme SFI -configuration Debug \
+            -only-testing:SFUnitTests \
+            -destination "platform=iOS Simulator,name=$SIM" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
       - name: Archive SFI (unsigned)
         run: |-
           cd clients/apple
