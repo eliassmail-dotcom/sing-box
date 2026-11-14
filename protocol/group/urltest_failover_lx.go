@@ -180,7 +180,7 @@ func (g *URLTestGroup) failoverSelect(network string, reselect bool) (adapter.Ou
 		case N.NetworkUDP:
 			current = g.selectedOutboundUDP
 		}
-		if current != nil {
+		if current != nil && g.guardAllows(RealTag(current, N.NetworkTCP)) {
 			if history := g.history.LoadURLTestHistory(RealTag(current, N.NetworkTCP)); history != nil {
 				// lx: SPEC 126 — a confirmed-slow held node yields only to a node
 				// failoverMove × faster in the fresh full run.
