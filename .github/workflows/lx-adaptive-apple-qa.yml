@@ -1,4 +1,4 @@
-name: LX first-start diagnostics unsigned IPA
+name: LX passive guard + first-start diagnostics unsigned IPA
 
 on:
   push:
@@ -26,8 +26,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin feature/lx-adaptive-health-ui
-          git -C clients/apple checkout --detach c4523ce930c6f17c51ddeabc0bc4a51b472f6e63
-          test "$(git -C clients/apple rev-parse HEAD)" = "c4523ce930c6f17c51ddeabc0bc4a51b472f6e63"
+          git -C clients/apple checkout --detach f8881517192523b4f73ee27a9f015c815606ae91
+          test "$(git -C clients/apple rev-parse HEAD)" = "f8881517192523b4f73ee27a9f015c815606ae91"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -61,6 +61,19 @@ jobs:
           grep -n -B2 -A20 'Protocol LibboxCommandClientHandlerProtocol' clients/apple/Libbox.xcframework/ios-arm64/Libbox.framework/Headers/Libbox.h || \
             grep -n -A20 'LibboxCommandClientHandlerProtocol' clients/apple/Libbox.xcframework/ios-arm64/Libbox.framework/Headers/Libbox.h | head -60
 
+      - name: Resolve Swift packages into isolated build directory
+        run: |
+          cd clients/apple
+          mkdir -p build/SourcePackages
+          for attempt in 1 2 3; do
+            if xcodebuild -resolvePackageDependencies -scheme SFI -clonedSourcePackagesDirPath "$PWD/build/SourcePackages"; then
+              exit 0
+            fi
+            echo "SwiftPM resolve attempt $attempt failed; retrying isolated checkout"
+            sleep 5
+          done
+          exit 1
+
       - name: Run SFUnitTests (iOS simulator)
         run: |-
           SIM=$(xcrun simctl list devices available -j | python3 -c "
@@ -76,6 +89,7 @@ jobs:
           cd clients/apple
           set +e
           xcodebuild test -skipPackagePluginValidation \
+            -clonedSourcePackagesDirPath "$PWD/build/SourcePackages" \
             -scheme SFI -configuration Debug \
             -only-testing:SFUnitTests \
             -destination "platform=iOS Simulator,name=$SIM" \
@@ -98,6 +112,7 @@ jobs:
           cd clients/apple
           rm -rf build/SFI.xcarchive
           xcodebuild archive -skipPackagePluginValidation \
+            -clonedSourcePackagesDirPath "$PWD/build/SourcePackages" \
             -scheme SFI -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath build/SFI.xcarchive \
@@ -106,15 +121,15 @@ jobs:
       - name: Package unsigned IPA (for GBox signing)
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lx-first-start-diagnostics-unsigned.ipa
+          rm -rf Payload SFI-lx-passive-guard-diagnostics-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
-          zip -qry SFI-lx-first-start-diagnostics-unsigned.ipa Payload
-          ls -lh SFI-lx-first-start-diagnostics-unsigned.ipa
+          zip -qry SFI-lx-passive-guard-diagnostics-unsigned.ipa Payload
+          ls -lh SFI-lx-passive-guard-diagnostics-unsigned.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lx-first-start-diagnostics-unsigned-ipa
-          path: clients/apple/build/SFI-lx-first-start-diagnostics-unsigned.ipa
+          name: SFI-lx-passive-guard-diagnostics-unsigned-ipa
+          path: clients/apple/build/SFI-lx-passive-guard-diagnostics-unsigned.ipa
           compression-level: 1
