@@ -43,7 +43,14 @@ func (g *URLTestGroup) fasterEnough(current, candidate uint16) bool {
 }
 
 func (g *URLTestGroup) holdSelected(network string, current adapter.Outbound) bool {
-	if g.minHold <= 0 || current == nil {
+	if current == nil {
+		return false
+	}
+	if manual := g.manualHold.Load(); manual != nil &&
+		manual.tag == RealTag(current, network) && time.Now().Before(manual.until) {
+		return true
+	}
+	if g.minHold <= 0 {
 		return false
 	}
 	var last int64
