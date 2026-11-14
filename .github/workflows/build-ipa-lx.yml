@@ -1,6 +1,9 @@
-name: Build SFI IPA (LX v1.14.4-lx.33, unsigned for GBox signing)
+name: Build SFI IPA (LX runtime settings test, unsigned)
 
 on:
+  push:
+    branches:
+      - ci/lx-runtime-settings
   workflow_dispatch:
 
 permissions:
@@ -22,7 +25,8 @@ jobs:
         run: |-
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
-          git -C clients/apple checkout lx
+          git -C clients/apple fetch --no-tags origin feature/lx-runtime-settings
+          git -C clients/apple checkout --detach FETCH_HEAD
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -96,7 +100,7 @@ jobs:
       - name: Package unsigned IPA (for GBox signing)
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lx-v1-unsigned.ipa
+          rm -rf Payload SFI-lx-runtime-settings-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
           zip -qry SFI-lx-v1-unsigned.ipa Payload
@@ -105,6 +109,6 @@ jobs:
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lx-v1-unsigned-ipa
+          name: SFI-lx-runtime-settings-unsigned-ipa
           path: clients/apple/build/SFI-lx-v1-unsigned.ipa
           compression-level: 1
