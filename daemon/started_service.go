@@ -798,6 +798,20 @@ func (s *StartedService) SelectOutbound(ctx context.Context, request *SelectOutb
 	if !isLoaded {
 		return nil, status.Error(codes.NotFound, "selector not found: "+request.GroupTag)
 	}
+	// LX command extension: reuse the existing SelectOutbound RPC without
+	// introducing a protobuf change. A reserved outbound tag is accepted only
+	// when groupTag names a URLTest group. The Strategy selector itself remains
+	// untouched, so clicking an already active mode changes its nested node.
+	if request.OutboundTag == group.LXNextNodeTag {
+		urlTest, ok := outboundGroup.(*group.URLTest)
+		if !ok {
+			return nil, status.Error(codes.InvalidArgument, "next-node command requires a URLTest group")
+		}
+		if _, err := urlTest.CycleNode(); err != nil {
+			return nil, status.Error(codes.FailedPrecondition, err.Error())
+		}
+		return &emptypb.Empty{}, nil
+	}
 	selector, isSelector := outboundGroup.(*group.Selector)
 	if !isSelector {
 		return nil, status.Error(codes.InvalidArgument, "outbound is not a selector: "+request.GroupTag)
