@@ -117,7 +117,7 @@ func TestLXProbeURLsAnySuccessAndCancel(t *testing.T) {
 
 func TestLXURLTestTwoEndpointsKeepsAlive(t *testing.T) {
     server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        if r.URL.Path == "/bad" { w.WriteHeader(http.StatusInternalServerError); return }
+        if r.URL.Path == "/bad" {\n            conn, _, err := w.(http.Hijacker).Hijack()\n            if err == nil { _ = conn.Close() }\n            return\n        }
         w.WriteHeader(http.StatusNoContent)
     }))
     defer server.Close()
