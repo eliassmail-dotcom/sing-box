@@ -23,8 +23,8 @@ const (
 )
 
 type lxGuardNode struct {
-	hardFailures []time.Time
-	streamStalls []time.Time
+	hardFailures map[string]time.Time
+	streamStalls map[string]time.Time
 	suspectUntil time.Time
 	blockedUntil time.Time
 	pending      chan struct{} // one in-flight group dial when node is suspect
@@ -49,19 +49,20 @@ func (g *lxPassiveGuard) node(tag string) *lxGuardNode {
 	return n
 }
 
-func lxRecent(events []time.Time, cutoff time.Time) []time.Time {
-	// Events are appended in monotonic order by the guard's mutex.
-	for len(events) > 0 && events[0].Before(cutoff) {
-		events = events[1:]
+func lxRecent(events map[string]time.Time, cutoff time.Time) map[string]time.Time {
+	for target, at := range events {
+		if at.Before(cutoff) {
+			delete(events, target)
+		}
 	}
 	return events
 }
 
-// record returns true ONLY when this event starts a quarantine. Three
-// independent path-dead dial failures, or two distinct suspicious streams
-// plus a dial failure, must occur in the same 45-second window.
-func (g *lxPassiveGuard) record(tag string, hard bool) bool {
-	if tag == "" {
+// Only independent target destinations count as independent evidence. Three
+// failures to one blocked website must NOT quarantine a healthy VPN node.
+// The caller must supply a stable target identity (Socksaddr.String).
+func (g *lxPassiveGuard) record(tag string, hard bool, target string) bool {
+	if tag == "" || target == "" {
 		return false
 	}
 	g.mu.Lock()
@@ -71,9 +72,15 @@ func (g *lxPassiveGuard) record(tag string, hard bool) bool {
 	n.hardFailures = lxRecent(n.hardFailures, now.Add(-lxGuardWindow))
 	n.streamStalls = lxRecent(n.streamStalls, now.Add(-lxGuardWindow))
 	if hard {
-		n.hardFailures = append(n.hardFailures, now)
+		if n.hardFailures == nil {
+			n.hardFailures = make(map[string]time.Time)
+		}
+		n.hardFailures[target] = now
 	} else {
-		n.streamStalls = append(n.streamStalls, now)
+		if n.streamStalls == nil {
+			n.streamStalls = make(map[string]time.Time)
+		}
+		n.streamStalls[target] = now
 	}
 	n.suspectUntil = now.Add(lxGuardWindow)
 	if now.Before(n.blockedUntil) {
@@ -173,12 +180,12 @@ func (c *lxObservedConn) Read(p []byte) (int, error) {
 
 // guardedConn never changes transport deadlines, return values or error types.
 // Its report is only a weak hint; record() needs independent confirmation.
-func (g *URLTestGroup) guardedConn(tag string, conn net.Conn) net.Conn {
+func (g *URLTestGroup) guardedConn(tag string, target string, conn net.Conn) net.Conn {
 	if g.passiveGuard == nil || conn == nil {
 		return conn
 	}
 	return &lxObservedConn{Conn: conn, onStall: func() {
-		if g.passiveGuard.record(tag, false) {
+		if g.passiveGuard.record(tag, false, target) {
 			g.guardQuarantined(tag)
 		}
 	}}
@@ -210,7 +217,7 @@ func (g *URLTestGroup) guardAllows(nodeTag string) bool {
 	return g.passiveGuard == nil || !g.passiveGuard.blocked(nodeTag)
 }
 
-func (g *URLTestGroup) guardDial(ctx context.Context, tag string, dial func() (net.Conn, error)) (net.Conn, error) {
+func (g *URLTestGroup) guardDial(ctx context.Context, tag string, target string, dial func() (net.Conn, error)) (net.Conn, error) {
 	if g.passiveGuard == nil {
 		return dial()
 	}
@@ -223,7 +230,7 @@ func (g *URLTestGroup) guardDial(ctx context.Context, tag string, dial func() (n
 	if err == nil {
 		g.passiveGuard.success(tag)
 	} else if isPathDeadDialError(err) && !errors.Is(ctx.Err(), context.Canceled) {
-		if g.passiveGuard.record(tag, true) {
+		if g.passiveGuard.record(tag, true, target) {
 			g.guardQuarantined(tag)
 		}
 	}
