@@ -73,7 +73,7 @@ func (g *URLTestGroup) cycleNode(depth int) (string, error) {
 	current := tcp
 	if len(g.priorityOutbounds) > 0 {
 		current, _ = g.selectPriority(N.NetworkTCP)
-	} else if current == nil || g.history.LoadURLTestHistory(RealTag(current, N.NetworkTCP)) == nil {
+	} else if current == nil {
 		current, _ = g.Select(N.NetworkTCP)
 	}
 
@@ -117,7 +117,7 @@ func (g *URLTestGroup) cycleNode(depth int) (string, error) {
 			penalty: g.penaltyOf(realTag),
 		})
 	}
-	if len(candidates) < 2 {
+	if len(candidates) < 1 {
 		return "", ErrLXNoAlternative
 	}
 
