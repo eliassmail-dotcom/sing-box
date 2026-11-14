@@ -26,8 +26,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin feature/lx-adaptive-health-ui
-          git -C clients/apple checkout --detach d77e7f9bc4fa39016f9b53db39785d838b89c899
-          test "$(git -C clients/apple rev-parse HEAD)" = "d77e7f9bc4fa39016f9b53db39785d838b89c899"
+          git -C clients/apple checkout --detach e8ad6ba64e330774070f544e10a3e349e95bb573
+          test "$(git -C clients/apple rev-parse HEAD)" = "e8ad6ba64e330774070f544e10a3e349e95bb573"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -88,7 +88,10 @@ jobs:
           echo "Using simulator: $SIM"
           cd clients/apple
           set +e
+          rm -rf build/LXTests.xcresult
           xcodebuild test -skipPackagePluginValidation \
+            -resultBundlePath "$PWD/build/LXTests.xcresult" \
+            -parallel-testing-enabled NO \
             -clonedSourcePackagesDirPath "$PWD/build/SourcePackages" \
             -scheme SFI -configuration Debug \
             -only-testing:SFUnitTests \
@@ -97,6 +100,10 @@ jobs:
           STATUS=$?
           set -e
           if [ "$STATUS" -ne 0 ]; then
+            echo "--- XCTest summary ---"
+            xcrun xcresulttool get test-results summary --path build/LXTests.xcresult || true
+            echo "--- XCTest test failures ---"
+            xcrun xcresulttool get test-results tests --path build/LXTests.xcresult || true
             echo "--- recent simulator crash reports ---"
             for f in $(ls -t ~/Library/Logs/DiagnosticReports/*.ips 2>/dev/null | head -3); do
               echo "=== $f"
@@ -106,6 +113,15 @@ jobs:
           fi
           exit $STATUS
 
+
+      - name: Upload XCTest diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SFI-lx-test-results
+          path: clients/apple/build/LXTests.xcresult
+          retention-days: 3
+          compression-level: 1
 
       - name: Archive SFI (unsigned)
         run: |-
