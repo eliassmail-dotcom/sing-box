@@ -1,4 +1,4 @@
-name: LX passive guard + first-start diagnostics unsigned IPA
+name: LX Gemini Chains + Resilience Profiles unsigned IPA
 
 on:
   push:
@@ -26,8 +26,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin feature/lx-adaptive-health-ui
-          git -C clients/apple checkout --detach f8881517192523b4f73ee27a9f015c815606ae91
-          test "$(git -C clients/apple rev-parse HEAD)" = "f8881517192523b4f73ee27a9f015c815606ae91"
+          git -C clients/apple checkout --detach ab6d0301c91e560d48a2b2d3a74f1628c977604d
+          test "$(git -C clients/apple rev-parse HEAD)" = "ab6d0301c91e560d48a2b2d3a74f1628c977604d"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -121,15 +121,15 @@ jobs:
       - name: Package unsigned IPA (for GBox signing)
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lx-passive-guard-diagnostics-unsigned.ipa
+          rm -rf Payload SFI-lx-gemini-chains-resilience-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
-          zip -qry SFI-lx-passive-guard-diagnostics-unsigned.ipa Payload
-          ls -lh SFI-lx-passive-guard-diagnostics-unsigned.ipa
+          zip -qry SFI-lx-gemini-chains-resilience-unsigned.ipa Payload
+          ls -lh SFI-lx-gemini-chains-resilience-unsigned.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lx-passive-guard-diagnostics-unsigned-ipa
-          path: clients/apple/build/SFI-lx-passive-guard-diagnostics-unsigned.ipa
+          name: SFI-lx-gemini-chains-resilience-unsigned-ipa
+          path: clients/apple/build/SFI-lx-gemini-chains-resilience-unsigned.ipa
           compression-level: 1
