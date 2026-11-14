@@ -65,11 +65,23 @@ jobs:
           ")
           echo "Using simulator: $SIM"
           cd clients/apple
+          set +e
           xcodebuild test -skipPackagePluginValidation \
             -scheme SFI -configuration Debug \
             -only-testing:SFUnitTests \
             -destination "platform=iOS Simulator,name=$SIM" \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+            CODE_SIGN_IDENTITY=-
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            echo "--- recent simulator crash reports ---"
+            for f in $(ls -t ~/Library/Logs/DiagnosticReports/*.ips 2>/dev/null | head -3); do
+              echo "=== $f"
+              head -c 3000 "$f"
+              echo
+            done
+          fi
+          exit $STATUS
 
       - name: Archive SFI (unsigned)
         run: |-
