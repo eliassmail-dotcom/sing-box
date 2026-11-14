@@ -29,7 +29,7 @@ jobs:
       - name: Go regression tests (protocol/group)
         run: go test -count=1 -timeout=12m ./protocol/group
       - name: Compile daemon and Libbox command bridge (no iOS build)
-        run: go test -run '^$' ./daemon ./experimental/libbox
+        run: go test -ldflags '-checklinkname=0' -run '^$' ./daemon ./experimental/libbox
       - name: Format LX next-node files on the branch
         run: |
           files="protocol/group/urltest_cycle_lx.go protocol/group/urltest_cycle_lx_test.go protocol/group/urltest_adaptive_lx.go"
