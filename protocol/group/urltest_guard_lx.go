@@ -98,7 +98,8 @@ func (g *lxPassiveGuard) blocked(tag string) bool {
 	return n != nil && g.now().Before(n.blockedUntil)
 }
 
-// success clears tentative evidence but never shortens an active quarantine.
+// A successful proxy dial proves that a connection could be established, not
+// that a larger payload can flow. Keep passive stalls until their window expires.
 func (g *lxPassiveGuard) success(tag string) {
 	if g == nil {
 		return
@@ -107,7 +108,6 @@ func (g *lxPassiveGuard) success(tag string) {
 	defer g.mu.Unlock()
 	if n := g.nodes[tag]; n != nil {
 		n.hardFailures = nil
-		n.streamStalls = nil
 		n.suspectUntil = time.Time{}
 	}
 }
@@ -187,9 +187,23 @@ func (g *URLTestGroup) guardedConn(tag string, conn net.Conn) net.Conn {
 func (g *URLTestGroup) guardQuarantined(tag string) {
 	g.logger.Warn("lx reliability: repeated path failures, temporary quarantine for ", tag)
 	g.history.DeleteURLTestHistory(tag)
-	// A selected node must not remain pinned. This does not interrupt existing
-	// connections when interrupt_exist_connections=false.
-	g.performSelectionUpdate(false)
+	// Deliberately use SPEC 054's moveSelection (no Interrupt), never the
+	// regular URLTest update path, to preserve existing YouTube/HTTP streams.
+	for _, network := range []string{"tcp", "udp"} {
+		tcp, udp := g.selectedLx()
+		current := tcp
+		if network == "udp" {
+			current = udp
+		}
+		if current == nil || RealTag(current, network) != tag {
+			continue
+		}
+		next, _ := g.selectForUpdate(network, false)
+		if next != nil && next != current {
+			g.moveSelection(network, next)
+		}
+	}
+	g.history.NotifyUpdated()
 }
 
 func (g *URLTestGroup) guardAllows(nodeTag string) bool {
