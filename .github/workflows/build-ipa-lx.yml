@@ -26,8 +26,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin feature/lx-runtime-settings
-          git -C clients/apple checkout --detach 54f6ee06f792af9bd6f7beb31c065e9a8667604c
-          test "$(git -C clients/apple rev-parse HEAD)" = "54f6ee06f792af9bd6f7beb31c065e9a8667604c"
+          git -C clients/apple checkout --detach 71067fc7790093213757a895b7dec18e10633cda
+          test "$(git -C clients/apple rev-parse HEAD)" = "71067fc7790093213757a895b7dec18e10633cda"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
