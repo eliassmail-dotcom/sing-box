@@ -1,4 +1,4 @@
-name: Build sing-box lx++ Reliability + Next Node unsigned IPA
+name: LX first-start diagnostics unsigned IPA
 
 on:
   push:
@@ -26,8 +26,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin feature/lx-adaptive-health-ui
-          git -C clients/apple checkout --detach 3d4ee772b405c9d6a5161e1efcba7cb7faaa4cff
-          test "$(git -C clients/apple rev-parse HEAD)" = "3d4ee772b405c9d6a5161e1efcba7cb7faaa4cff"
+          git -C clients/apple checkout --detach c4523ce930c6f17c51ddeabc0bc4a51b472f6e63
+          test "$(git -C clients/apple rev-parse HEAD)" = "c4523ce930c6f17c51ddeabc0bc4a51b472f6e63"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -106,15 +106,15 @@ jobs:
       - name: Package unsigned IPA (for GBox signing)
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lx-reliability-next-node-unsigned.ipa
+          rm -rf Payload SFI-lx-first-start-diagnostics-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
-          zip -qry SFI-lx-reliability-next-node-unsigned.ipa Payload
-          ls -lh SFI-lx-reliability-next-node-unsigned.ipa
+          zip -qry SFI-lx-first-start-diagnostics-unsigned.ipa Payload
+          ls -lh SFI-lx-first-start-diagnostics-unsigned.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lx-reliability-next-node-unsigned-ipa
-          path: clients/apple/build/SFI-lx-reliability-next-node-unsigned.ipa
+          name: SFI-lx-first-start-diagnostics-unsigned-ipa
+          path: clients/apple/build/SFI-lx-first-start-diagnostics-unsigned.ipa
           compression-level: 1
