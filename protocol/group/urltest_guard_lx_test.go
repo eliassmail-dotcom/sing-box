@@ -7,6 +7,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sagernet/sing-box/adapter"
+	N "github.com/sagernet/sing/common/network"
 )
 
 func TestLXGuardThreeHardFailures(t *testing.T) {
@@ -106,5 +109,43 @@ func TestLXPassiveReadClassification(t *testing.T) {
 	}
 	if !lxSuspiciousStreamRead(os.ErrDeadlineExceeded, 40, 16000) {
 		t.Fatal("qualified timeout should be a weak stall hint")
+	}
+}
+
+func TestLXGuardSelectionSkipsQuarantine(t *testing.T) {
+	a := newFailoverNode("base", 0)
+	b := newFailoverNode("white", 0)
+	g := newFailoverTestGroup(t, a, b)
+	g.failover = false
+	g.passiveGuard = newLXPassiveGuard()
+	g.priorityOutbounds = map[string]bool{"base": true}
+	g.history.StoreURLTestHistory("base", &adapter.URLTestHistory{Time: time.Now(), Delay: 10})
+	g.history.StoreURLTestHistory("white", &adapter.URLTestHistory{Time: time.Now(), Delay: 200})
+	g.setSelectedTCPLx(a)
+	if got := g.pickForDialNode(N.NetworkTCP); got != a {
+		t.Fatalf("preferred node should win while healthy: %v", got)
+	}
+	for i := 0; i < 3; i++ { g.passiveGuard.record("base", true) }
+	if got := g.pickForDialNode(N.NetworkTCP); got != b {
+		t.Fatalf("quarantined preferred node must yield to fallback: %v", got)
+	}
+	g.failover = true
+	g.priorityOutbounds = nil
+	if got, _ := g.failoverSelect(N.NetworkTCP, false); got != b {
+		t.Fatalf("failover must release a quarantined hold: %v", got)
+	}
+}
+
+func TestLXGuardColdStartSkipsQuarantinedNode(t *testing.T) {
+	a := newFailoverNode("a", 0)
+	b := newFailoverNode("b", 0)
+	g := newFailoverTestGroup(t, a, b)
+	g.failover = false
+	g.passiveGuard = newLXPassiveGuard()
+	g.setSelectedTCPLx(a)
+	for i := 0; i < 3; i++ { g.passiveGuard.record("a", true) }
+	// No URLTest history for either node. The old cached selection must not win.
+	if got := g.pickForDialNode(N.NetworkTCP); got != b {
+		t.Fatalf("cold start must choose non-quarantined fallback: %v", got)
 	}
 }
