@@ -65,6 +65,21 @@ func TestLXCycleNoHealthyAlternative(t *testing.T) {
 	}
 }
 
+func TestLXCycleDeadCurrentToOnlyLiveAlternative(t *testing.T) {
+	dead, alive := newFailoverNode("dead", 0), newFailoverNode("alive", 0)
+	g := newFailoverTestGroup(t, dead, alive)
+	g.failover = false
+	g.setSelectedTCPLx(dead)
+	lxAlive(g, "alive", 110)
+	got, err := g.cycleNode(0)
+	if err != nil || got != "alive" {
+		t.Fatalf("must replace dead cached node with sole live alternative: %s %v", got, err)
+	}
+	if selected, _ := g.selectedLx(); selected != alive {
+		t.Fatal("cached selection must move to the healthy node")
+	}
+}
+
 func lxNestedURLTest(t *testing.T, tag string, nodes ...*failoverNode) (*URLTest, *URLTestGroup) {
 	t.Helper()
 	byTag := make([]string, len(nodes))
