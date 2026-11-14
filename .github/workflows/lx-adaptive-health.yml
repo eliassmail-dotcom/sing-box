@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   group-tests:
@@ -28,6 +28,17 @@ jobs:
         run: go test -count=1 -timeout=12m ./protocol/group -run '^(TestLX|TestPriorityFallback_)'
       - name: Go regression tests (protocol/group)
         run: go test -count=1 -timeout=12m ./protocol/group
+      - name: Format LX health files (one-time branch cleanup)
+        run: |
+          files="protocol/group/urltest_adaptive_lx.go protocol/group/urltest_multi_lx.go protocol/group/urltest_adaptive_lx_test.go"
+          gofmt -w $files
+          if ! git diff --quiet -- $files; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add $files
+            git commit -m "style(lx): gofmt adaptive health source"
+            git push origin HEAD:feature/lx-adaptive-health
+          fi
       - name: Check gofmt
         run: |
           files="protocol/group/urltest_adaptive_lx.go protocol/group/urltest_multi_lx.go protocol/group/urltest_adaptive_lx_test.go"
