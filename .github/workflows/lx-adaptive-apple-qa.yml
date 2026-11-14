@@ -1,0 +1,94 @@
+name: LX adaptive health iOS simulator QA
+
+on:
+  push:
+    branches:
+      - feature/lx-adaptive-health
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Libbox + SFI unsigned IPA (LX)
+    runs-on: xcode-27
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - name: Checkout (LX sources, no submodules yet)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Init submodules (Apple client from feature/lx-runtime-settings)
+        run: |-
+          git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
+          git submodule update --init --recursive
+          git -C clients/apple fetch --no-tags origin feature/lx-adaptive-health-ui
+          git -C clients/apple checkout --detach 10ffec85be55ada9dab4ddc9efcdb5b6c9a89851
+          test "$(git -C clients/apple rev-parse HEAD)" = "10ffec85be55ada9dab4ddc9efcdb5b6c9a89851"
+          git -C clients/apple submodule update --init --recursive
+          git -C clients/apple rev-parse HEAD
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.10
+          cache: false
+
+      - name: Patch Go for iOS
+        run: .github/patch_go_for_ios.sh
+
+      - name: Test LX adaptive health and base-white priority
+        run: |-
+          go test ./protocol/group -run '^(TestLX|TestPriorityFallback_)' -count=1 -timeout=8m
+
+      - name: Build Libbox.xcframework (ios/arm64 + simulator, with_clash_api via integration patch)
+        run: |-
+          make lib_install
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          git tag v1.14.4-lx.33 -f
+          go run ./cmd/internal/build_libbox -target apple -platform ios/arm64,iossimulator/arm64
+          rm -rf clients/apple/Libbox.xcframework
+          cp -R Libbox.xcframework clients/apple/Libbox.xcframework
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Dump CommandClientHandler protocol (diagnostic)
+        run: |-
+          grep -n -B2 -A20 'Protocol LibboxCommandClientHandlerProtocol' clients/apple/Libbox.xcframework/ios-arm64/Libbox.framework/Headers/Libbox.h || \
+            grep -n -A20 'LibboxCommandClientHandlerProtocol' clients/apple/Libbox.xcframework/ios-arm64/Libbox.framework/Headers/Libbox.h | head -60
+
+      - name: Run SFUnitTests (iOS simulator)
+        run: |-
+          SIM=$(xcrun simctl list devices available -j | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)
+          for dev in d['devices'].values():
+              for x in dev:
+                  if x['isAvailable'] and x['name'].startswith('iPhone'):
+                      print(x['name']); raise SystemExit
+          sys.exit(1)
+          ")
+          echo "Using simulator: $SIM"
+          cd clients/apple
+          set +e
+          xcodebuild test -skipPackagePluginValidation \
+            -scheme SFI -configuration Debug \
+            -only-testing:SFUnitTests \
+            -destination "platform=iOS Simulator,name=$SIM" \
+            CODE_SIGN_IDENTITY=-
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            echo "--- recent simulator crash reports ---"
+            for f in $(ls -t ~/Library/Logs/DiagnosticReports/*.ips 2>/dev/null | head -3); do
+              echo "=== $f"
+              head -c 3000 "$f"
+              echo
+            done
+          fi
+          exit $STATUS
+
