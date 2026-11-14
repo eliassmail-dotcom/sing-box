@@ -52,6 +52,7 @@ type URLTest struct {
 	interruptExternalConnections bool
 	balancer                     *balancer // lx: SPEC 019 — nil for least_test (default)
 	failover                     bool      // lx: SPEC 116 — mode: failover
+	priorityOutbounds            map[string]bool // LX: tier-1 groups used before other outbounds
 }
 
 func NewURLTest(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.URLTestOutboundOptions) (adapter.Outbound, error) {
@@ -68,6 +69,19 @@ func NewURLTest(ctx context.Context, router adapter.Router, logger log.ContextLo
 	}
 	// lx: SPEC 116 — failover holds the working node until it fails.
 	failover := isFailoverMode(options)
+	if len(options.PriorityOutbounds) > 0 && (failover || balancer != nil) {
+		return nil, E.New("urltest: priority_outbounds is only valid with least_test mode")
+	}
+	primary := make(map[string]bool, len(options.PriorityOutbounds))
+	for _, preferred := range options.PriorityOutbounds {
+		if !slices.Contains(options.Outbounds, preferred) {
+			return nil, E.New("urltest: priority outbound not in outbounds: ", preferred)
+		}
+		if primary[preferred] {
+			return nil, E.New("urltest: duplicate priority outbound: ", preferred)
+		}
+		primary[preferred] = true
+	}
 	if warnFailoverTolerance(failover, options) {
 		logger.Warn("urltest: tolerance is ignored in failover mode")
 	}
@@ -84,6 +98,7 @@ func NewURLTest(ctx context.Context, router adapter.Router, logger log.ContextLo
 		interruptExternalConnections: options.InterruptExistConnections,
 		balancer:                     balancer,
 		failover:                     failover,
+		priorityOutbounds:            primary,
 	}
 	if len(outbound.tags) == 0 {
 		return nil, E.New("missing tags")
@@ -114,6 +129,7 @@ func (s *URLTest) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 		group.balancer = s.balancer // lx: SPEC 019 v2 — health-check drives the pool through it
 		group.groupTag = s.Tag()    // lx: SPEC 020 — probe gating needs the group's own tag
 		group.failover = s.failover // lx: SPEC 116
+		group.priorityOutbounds = s.priorityOutbounds // LX: preferred base groups before whitelist fallbacks
 		if s.balancer != nil {
 			// lx: SPEC 020 — a pool rebuild changes the active routing tree; invalidate
 			// the router's reachable cache. ctx captured here has the invalidator.
@@ -392,6 +408,7 @@ type URLTestGroup struct {
 	balancer                     *balancer                 // lx: SPEC 019 v2 — round_robin pool; nil for least_test
 	groupTag                     string                    // lx: SPEC 020 — set by URLTest.Start (probe gating)
 	failover                     bool                      // lx: SPEC 116 — set by URLTest.Start
+	priorityOutbounds            map[string]bool           // LX: tags of preferred group outbounds
 	lastTickRunEnd               atomic.Int64              // lx: SPEC 125 — end of the last non-forced probe run, UnixNano
 	failoverSlow                 atomic.Pointer[tagSet]    // lx: SPEC 126 — confirmed-slow held tags during a failover reselect
 	reachability                 adapter.ReachabilityReporter
@@ -496,6 +513,9 @@ func (g *URLTestGroup) Close() error {
 }
 
 func (g *URLTestGroup) Select(network string) (adapter.Outbound, bool) {
+	if len(g.priorityOutbounds) > 0 {
+		return g.selectPriority(network)
+	}
 	var minDelay uint16
 	var minOutbound adapter.Outbound
 	selectedTCP, selectedUDP := g.selectedLx() // lx: SPEC 139
@@ -538,6 +558,52 @@ func (g *URLTestGroup) Select(network string) (adapter.Outbound, bool) {
 		return nil, false
 	}
 	return minOutbound, true
+}
+
+// selectPriority implements a two-tier URLTest: any responsive preferred outbound
+// wins over every fallback, irrespective of RTT. Within the winning tier, latency
+// and the configured tolerance still determine the candidate. No prior probe
+// means a conservative cold start on the first preferred outbound.
+func (g *URLTestGroup) selectPriority(network string) (adapter.Outbound, bool) {
+	tcp, udp := g.selectedLx()
+	current := tcp
+	if network == N.NetworkUDP {
+		current = udp
+	}
+	choose := func(preferred bool) (adapter.Outbound, bool) {
+		var best adapter.Outbound
+		var bestDelay uint16
+		if current != nil && g.priorityOutbounds[current.Tag()] == preferred {
+			if supportsNetwork(current, network) {
+				if history := g.history.LoadURLTestHistory(RealTag(current, network)); history != nil {
+					best, bestDelay = current, history.Delay
+				}
+			}
+		}
+		for _, detour := range g.outbounds {
+			if g.priorityOutbounds[detour.Tag()] != preferred || !supportsNetwork(detour, network) {
+				continue
+			}
+			history := g.history.LoadURLTestHistory(RealTag(detour, network))
+			if history == nil {
+				continue
+			}
+			if best == nil || bestDelay > history.Delay + g.tolerance {
+				best, bestDelay = detour, history.Delay
+			}
+		}
+		return best, best != nil
+	}
+	if best, ok := choose(true); ok { return best, true }
+	if best, ok := choose(false); ok { return best, true }
+	for _, preferred := range []bool{true, false} {
+		for _, detour := range g.outbounds {
+			if g.priorityOutbounds[detour.Tag()] == preferred && supportsNetwork(detour, network) {
+				return detour, false
+			}
+		}
+	}
+	return nil, false
 }
 
 func (g *URLTestGroup) loopCheck(ticker *time.Ticker, closeChan <-chan struct{}) {
