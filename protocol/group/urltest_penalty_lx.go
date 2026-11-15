@@ -132,15 +132,16 @@ func (g *URLTestGroup) penaltyEmergency(network string) bool {
 // с history, минус исключённый тег. nil, если кандидатов нет.
 func (g *URLTestGroup) penaltyBest(network string, excludeTag string) adapter.Outbound {
 	if len(g.priorityOutbounds) > 0 {
-		// A successful fallback dial may not bypass another responsive primary.
+		// A failed path may not keep Base eligible just because its last URLTest succeeded.
+		// Quarantined and penalty-rejected nodes are excluded before tier ranking.
 		for _, preferred := range []bool{true, false} {
 			var choice adapter.Outbound
 			var minPenalty int64
 			var minDelay uint16
 			for _, detour := range g.outbounds {
-				if g.priorityOutbounds[detour.Tag()] != preferred || !supportsNetwork(detour, network) || !g.guardAllows(RealTag(detour, N.NetworkTCP)) { continue }
+				if g.priorityOutbounds[detour.Tag()] != preferred || !g.priorityNodeEligible(detour, network) { continue }
 				tag := RealTag(detour, N.NetworkTCP)
-				if tag == excludeTag || !g.guardAllows(tag) { continue }
+				if tag == excludeTag { continue }
 				history := g.history.LoadURLTestHistory(tag)
 				if history == nil { continue }
 				p := g.penaltyOf(tag)
