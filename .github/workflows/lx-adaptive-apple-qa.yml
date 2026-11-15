@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
 
+# Keep only the newest iOS IPA build per branch. Branch-scoped groups prevent
+# a manual dispatch on the default branch cancelling feature-branch builds.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Libbox + SFI unsigned IPA (LX)
