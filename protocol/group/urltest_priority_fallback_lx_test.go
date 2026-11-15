@@ -38,6 +38,32 @@ func TestPriorityFallback_BasePreferredFailAndRecover(t *testing.T) {
     assertSelected(t, g, N.NetworkUDP, base)
 }
 
+// Smart's flat pool can contain many Base leaves. One healthy Base node
+// must keep White out of the route even when White is substantially faster.
+func TestPriorityFallback_AnyHealthyBaseBeatsFasterWhite(t *testing.T) {
+    baseA := newFailoverNode("base-a", 80*time.Millisecond)
+    baseB := newFailoverNode("base-b", 120*time.Millisecond)
+    white := newFailoverNode("white", 10*time.Millisecond)
+    g := newFailoverTestGroup(t, baseA, baseB, white)
+    g.failover = false
+    g.priorityOutbounds = map[string]bool{"base-a": true, "base-b": true}
+
+    if _, err := g.URLTest(context.Background()); err != nil { t.Fatal(err) }
+    assertSelected(t, g, N.NetworkTCP, baseA)
+
+    baseA.setErr(context.DeadlineExceeded)
+    if _, err := g.URLTest(context.Background()); err != nil { t.Fatal(err) }
+    assertSelected(t, g, N.NetworkTCP, baseB)
+
+    baseB.setErr(context.DeadlineExceeded)
+    if _, err := g.URLTest(context.Background()); err != nil { t.Fatal(err) }
+    assertSelected(t, g, N.NetworkTCP, white)
+
+    baseA.setErr(nil)
+    if _, err := g.URLTest(context.Background()); err != nil { t.Fatal(err) }
+    assertSelected(t, g, N.NetworkTCP, baseA)
+}
+
 func TestPriorityFallback_NoPrimaryAndNoBackupKeepsColdStart(t *testing.T) {
     base := newFailoverNode("base", 0)
     white := newFailoverNode("white", 0)
