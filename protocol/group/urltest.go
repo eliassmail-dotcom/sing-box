@@ -610,10 +610,10 @@ func (g *URLTestGroup) Select(network string) (adapter.Outbound, bool) {
 	return minOutbound, true
 }
 
-// selectPriority implements a two-tier URLTest: any responsive preferred outbound
-// wins over every fallback, irrespective of RTT. Within the winning tier, latency
-// and the configured tolerance still determine the candidate. No prior probe
-// means a conservative cold start on the first preferred outbound.
+// selectPriority implements two tiers of eligible candidates: Base wins over White
+// regardless of RTT, but a quarantined or path-rejected Base node does not count.
+// Within the eligible tier, latency and tolerance still select the candidate.
+// Before health is known, cold start prefers the first *eligible* Base node.
 func (g *URLTestGroup) selectPriority(network string) (adapter.Outbound, bool) {
 	tcp, udp := g.selectedLx()
 	current := tcp
@@ -623,7 +623,7 @@ func (g *URLTestGroup) selectPriority(network string) (adapter.Outbound, bool) {
 	choose := func(preferred bool) (adapter.Outbound, bool) {
 		var best adapter.Outbound
 		var bestDelay uint16
-		if current != nil && g.priorityOutbounds[current.Tag()] == preferred && g.guardAllows(RealTag(current, network)) {
+		if current != nil && g.priorityOutbounds[current.Tag()] == preferred && g.priorityNodeEligible(current, network) {
 			if supportsNetwork(current, network) {
 				if history := g.history.LoadURLTestHistory(RealTag(current, network)); history != nil {
 					best, bestDelay = current, history.Delay
@@ -632,7 +632,7 @@ func (g *URLTestGroup) selectPriority(network string) (adapter.Outbound, bool) {
 			}
 		}
 		for _, detour := range g.outbounds {
-			if g.priorityOutbounds[detour.Tag()] != preferred || !supportsNetwork(detour, network) || !g.guardAllows(RealTag(detour, network)) {
+			if g.priorityOutbounds[detour.Tag()] != preferred || !g.priorityNodeEligible(detour, network) {
 				continue
 			}
 			history := g.history.LoadURLTestHistory(RealTag(detour, network))
@@ -649,7 +649,7 @@ func (g *URLTestGroup) selectPriority(network string) (adapter.Outbound, bool) {
 	if best, ok := choose(false); ok { return best, true }
 	for _, preferred := range []bool{true, false} {
 		for _, detour := range g.outbounds {
-			if g.priorityOutbounds[detour.Tag()] == preferred && supportsNetwork(detour, network) && g.guardAllows(RealTag(detour, network)) {
+			if g.priorityOutbounds[detour.Tag()] == preferred && g.priorityNodeEligible(detour, network) {
 				return detour, false
 			}
 		}
@@ -884,7 +884,7 @@ func (g *URLTestGroup) performSelectionUpdate(reselect bool) {
 	)
 	// lx: SPEC 054 — переизбор с учётом штрафов (в аварийном режиме — штрафы ↑, задержка ↑).
 	// lx: SPEC 116 — failover держит текущий узел (selectForUpdate).
-	if outbound, exists := g.selectForUpdate(N.NetworkTCP, reselect); outbound != nil && (g.selectedOutboundTCP == nil || ((exists || !g.guardAllows(RealTag(g.selectedOutboundTCP, N.NetworkTCP))) && outbound != g.selectedOutboundTCP)) {
+	if outbound, exists := g.selectForUpdate(N.NetworkTCP, reselect); outbound != nil && (g.selectedOutboundTCP == nil || ((exists || !g.selectionNodeEligible(g.selectedOutboundTCP, N.NetworkTCP)) && outbound != g.selectedOutboundTCP)) {
 		if g.selectedOutboundTCP != nil {
 			updated = true
 		}
@@ -895,7 +895,7 @@ func (g *URLTestGroup) performSelectionUpdate(reselect bool) {
 		g.setSelectedTCPLx(outbound) // lx: SPEC 139
 		selected = true
 	}
-	if outbound, exists := g.selectForUpdate(N.NetworkUDP, reselect); outbound != nil && (g.selectedOutboundUDP == nil || ((exists || !g.guardAllows(RealTag(g.selectedOutboundUDP, N.NetworkUDP))) && outbound != g.selectedOutboundUDP)) {
+	if outbound, exists := g.selectForUpdate(N.NetworkUDP, reselect); outbound != nil && (g.selectedOutboundUDP == nil || ((exists || !g.selectionNodeEligible(g.selectedOutboundUDP, N.NetworkUDP)) && outbound != g.selectedOutboundUDP)) {
 		if g.selectedOutboundUDP != nil {
 			updated = true
 		}
