@@ -1,4 +1,5 @@
 name: LX Local Generator + verified Next Node unsigned IPA
+run-name: "LX iOS regression | original VPN startup | standalone Resilience card"
 
 on:
   push:
