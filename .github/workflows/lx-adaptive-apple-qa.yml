@@ -1,5 +1,5 @@
 name: LX Local Generator + verified Next Node unsigned IPA
-run-name: "LX iOS regression | VPN startup reverted | standalone Resilience | IPA"
+run-name: "LX iOS regression | flat Smart base-white priority | standalone Resilience | IPA"
 
 on:
   push:
@@ -33,8 +33,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin feature/lx-adaptive-health-ui
-          git -C clients/apple checkout --detach c21417c1f97a16bc1f886fd2bc0ef2075d41dfee
-          test "$(git -C clients/apple rev-parse HEAD)" = "c21417c1f97a16bc1f886fd2bc0ef2075d41dfee"
+          git -C clients/apple checkout --detach 2afec4a92e58a6fd2ede5f04d64c0613a3e1f028
+          test "$(git -C clients/apple rev-parse HEAD)" = "2afec4a92e58a6fd2ede5f04d64c0613a3e1f028"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -47,7 +47,7 @@ jobs:
       - name: Patch Go for iOS
         run: .github/patch_go_for_ios.sh
 
-      - name: Test LX adaptive health and base-white priority
+      - name: Test LX adaptive health and Smart base-white priority
         run: |-
           go test ./protocol/group -run '^(TestLX|TestPriorityFallback_)' -count=1 -timeout=8m
 
