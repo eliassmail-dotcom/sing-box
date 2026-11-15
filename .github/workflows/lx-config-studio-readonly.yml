@@ -14,7 +14,7 @@ permissions:
 # a manual dispatch on the default branch cancelling feature-branch builds.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -33,8 +33,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin feature/config-studio-readonly
-          git -C clients/apple checkout --detach 4010df95584f80ddce569e37681147b3908c5de0
-          test "$(git -C clients/apple rev-parse HEAD)" = "4010df95584f80ddce569e37681147b3908c5de0"
+          git -C clients/apple checkout --detach b3a8111993fc48b4f603e5884654ba1843529128
+          test "$(git -C clients/apple rev-parse HEAD)" = "b3a8111993fc48b4f603e5884654ba1843529128"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -144,7 +144,7 @@ jobs:
       - name: Package unsigned IPA (for GBox signing)
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lxpp-v1.14.9-b14-ConfigStudio-Native-unsigned.ipa
+          rm -rf Payload SFI-lxpp-v1.14.9-b14-ConfigStudio-Native-final-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
           APP_INFO="Payload/sing-box.app/Info.plist"
@@ -153,12 +153,12 @@ jobs:
           test "$APP_VERSION" = "1.14.9"
           test "$APP_BUILD" = "14"
           echo "Packaging sing-box lx++ $APP_VERSION ($APP_BUILD)"
-          zip -qry SFI-lxpp-v1.14.9-b14-ConfigStudio-Native-unsigned.ipa Payload
-          ls -lh SFI-lxpp-v1.14.9-b14-ConfigStudio-Native-unsigned.ipa
+          zip -qry SFI-lxpp-v1.14.9-b14-ConfigStudio-Native-final-unsigned.ipa Payload
+          ls -lh SFI-lxpp-v1.14.9-b14-ConfigStudio-Native-final-unsigned.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lxpp-v1.14.9-b14-ConfigStudio-Native-unsigned-ipa
-          path: clients/apple/build/SFI-lxpp-v1.14.9-b14-ConfigStudio-Native-unsigned.ipa
+          name: SFI-lxpp-v1.14.9-b14-ConfigStudio-Native-final-unsigned-ipa
+          path: clients/apple/build/SFI-lxpp-v1.14.9-b14-ConfigStudio-Native-final-unsigned.ipa
           compression-level: 1
