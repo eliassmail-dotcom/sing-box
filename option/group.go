@@ -11,6 +11,9 @@ type SelectorOutboundOptions struct {
 type URLTestOutboundOptions struct {
 	Outbounds                 []string           `json:"outbounds" reference:"outbound"`
 	URL                       string             `json:"url,omitempty"`
+	URLs                      []string           `json:"urls,omitempty"` // LX: any successful endpoint proves node health (max 3)
+	TolerancePercent          uint8              `json:"tolerance_percent,omitempty"` // LX: 0=legacy absolute tolerance, 1..100=adaptive relative threshold
+	MinHold                   badoption.Duration `json:"min_hold,omitempty"` // LX: least_test minimum hold for healthy nodes; outages bypass
 	Interval                  badoption.Duration `json:"interval,omitempty"`
 	Tolerance                 uint16             `json:"tolerance,omitempty"`
 	IdleTimeout               badoption.Duration `json:"idle_timeout,omitempty"`
@@ -22,6 +25,9 @@ type URLTestOutboundOptions struct {
 	// This enables ordered base -> whitelist fallback with automatic recovery.
 	// Valid only in least_test mode; tags must also be present in outbounds.
 	PriorityOutbounds []string `json:"priority_outbounds,omitempty" reference:"outbound"`
+	// LX: opt-in passive stall diagnostics, short node quarantine and suspect dial pacing.
+	// Disabled by default; only least_test/failover (not round_robin).
+	PassiveGuard bool `json:"passive_guard,omitempty"`
 }
 
 // URLTestBalancerOptions configures round_robin: a fixed-size pool of live nodes, lazily

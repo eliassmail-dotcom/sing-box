@@ -161,7 +161,7 @@ func slowerBy(delay, than uint16, num, den int) bool {
 
 // probeNow probes one node regardless of its history age (confirmation probe).
 func (g *URLTestGroup) probeNow(ctx context.Context, node adapter.Outbound) map[string]uint16 {
-	return urlTestOutbounds(ctx, g.outbound, g.history, g.logger, []adapter.Outbound{node}, g.link, 0, false, g.penaltyReset)
+	return urlTestOutboundsLinks(ctx, g.outbound, g.history, g.logger, []adapter.Outbound{node}, g.probeLinks(), 0, false, g.penaltyReset)
 }
 
 // failoverSelect is the failover selection used by performSelectionUpdate.
@@ -180,7 +180,7 @@ func (g *URLTestGroup) failoverSelect(network string, reselect bool) (adapter.Ou
 		case N.NetworkUDP:
 			current = g.selectedOutboundUDP
 		}
-		if current != nil {
+		if current != nil && g.guardAllows(RealTag(current, N.NetworkTCP)) {
 			if history := g.history.LoadURLTestHistory(RealTag(current, N.NetworkTCP)); history != nil {
 				// lx: SPEC 126 — a confirmed-slow held node yields only to a node
 				// failoverMove × faster in the fresh full run.

@@ -107,7 +107,7 @@ func (g *URLTestGroup) fastestByDelay(network string) adapter.Outbound {
 	var minDelay uint16
 	var minOutbound adapter.Outbound
 	for _, detour := range g.outbounds {
-		if !supportsNetwork(detour, network) {
+		if !supportsNetwork(detour, network) || !g.guardAllows(RealTag(detour, N.NetworkTCP)) {
 			continue
 		}
 		history := g.history.LoadURLTestHistory(RealTag(detour, N.NetworkTCP))
@@ -138,9 +138,9 @@ func (g *URLTestGroup) penaltyBest(network string, excludeTag string) adapter.Ou
 			var minPenalty int64
 			var minDelay uint16
 			for _, detour := range g.outbounds {
-				if g.priorityOutbounds[detour.Tag()] != preferred || !supportsNetwork(detour, network) { continue }
+				if g.priorityOutbounds[detour.Tag()] != preferred || !supportsNetwork(detour, network) || !g.guardAllows(RealTag(detour, N.NetworkTCP)) { continue }
 				tag := RealTag(detour, N.NetworkTCP)
-				if tag == excludeTag { continue }
+				if tag == excludeTag || !g.guardAllows(tag) { continue }
 				history := g.history.LoadURLTestHistory(tag)
 				if history == nil { continue }
 				p := g.penaltyOf(tag)
@@ -160,7 +160,7 @@ func (g *URLTestGroup) penaltyBest(network string, excludeTag string) adapter.Ou
 			continue
 		}
 		realTag := RealTag(detour, N.NetworkTCP)
-		if realTag == excludeTag {
+		if realTag == excludeTag || !g.guardAllows(realTag) {
 			continue
 		}
 		history := g.history.LoadURLTestHistory(realTag)
@@ -217,7 +217,7 @@ func (g *URLTestGroup) pickForDialNode(network string) adapter.Outbound {
 	case N.NetworkUDP:
 		cached = g.selectedOutboundUDP
 	}
-	if cached != nil {
+	if cached != nil && g.guardAllows(RealTag(cached, N.NetworkTCP)) {
 		return cached
 	}
 	outbound, _ := g.Select(network)
@@ -244,6 +244,7 @@ func (g *URLTestGroup) moveSelection(network string, detour adapter.Outbound) {
 	}
 	g.access.Unlock()
 	if changed {
+		g.noteSelectionChange(network)
 		g.logger.Info("lx penalty: selection moved to ", detour.Tag(), " (", network, ")")
 		invalidateReachability(g.ctx)
 	}
@@ -275,7 +276,14 @@ func (g *URLTestGroup) penaltyFailoverDial(ctx context.Context, network string, 
 	if err != nil {
 		return nil, nil, false
 	}
-	conn, err := fallbackDialer.DialContext(ctx, network, destination)
+	var conn net.Conn
+	if !probe && network == N.NetworkTCP && g.passiveGuard != nil {
+		conn, err = g.guardDial(ctx, RealTag(fallback, N.NetworkTCP), destination.String(), func() (net.Conn, error) {
+			return fallbackDialer.DialContext(ctx, network, destination)
+		})
+	} else {
+		conn, err = fallbackDialer.DialContext(ctx, network, destination)
+	}
 	if err != nil {
 		g.logger.Error("lx penalty: fallback via ", fallback.Tag(), ": ", E.Cause(err, "dial"))
 		if probe {
@@ -332,7 +340,7 @@ func (g *URLTestGroup) penaltyTotal(network string) bool {
 			continue
 		}
 		realTag := RealTag(detour, N.NetworkTCP)
-		if g.history.LoadURLTestHistory(realTag) == nil {
+		if g.history.LoadURLTestHistory(realTag) == nil || !g.guardAllows(realTag) {
 			continue
 		}
 		sawCandidate = true

@@ -1,0 +1,51 @@
+name: LX adaptive health (Go checks)
+
+on:
+  push:
+    branches:
+      - feature/lx-adaptive-health
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  group-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - name: Use pinned Go version
+        id: pin
+        run: echo "go_version=$(sed 's/^go//' go.version | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ steps.pin.outputs.go_version }}
+          cache: false
+      - name: Go unit tests for adaptive health and base/white priority
+        run: go test -count=1 -timeout=12m ./protocol/group -run '^(TestLX|TestPriorityFallback_)'
+      - name: Go regression tests (protocol/group)
+        run: go test -count=1 -timeout=12m ./protocol/group
+      - name: Compile daemon and Libbox command bridge (no iOS build)
+        run: go test -ldflags '-checklinkname=0' -run '^$' ./daemon ./experimental/libbox
+      - name: Format LX next-node files on the branch
+        run: |
+          files="protocol/group/urltest_cycle_lx.go protocol/group/urltest_cycle_lx_test.go protocol/group/urltest_adaptive_lx.go"
+          gofmt -w $files
+          if ! git diff --quiet -- $files; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add $files
+            git commit -m "style(lx): gofmt next-node implementation"
+            git push origin HEAD:feature/lx-adaptive-health
+          fi
+      - name: Check gofmt
+        run: |
+          files="protocol/group/urltest_adaptive_lx.go protocol/group/urltest_multi_lx.go protocol/group/urltest_adaptive_lx_test.go protocol/group/urltest_cycle_lx.go protocol/group/urltest_cycle_lx_test.go"
+          if [ -n "$(gofmt -l $files)" ]; then
+            echo "Unformatted LX files:"
+            gofmt -l $files
+            exit 1
+          fi
