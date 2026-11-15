@@ -1,5 +1,5 @@
-name: LX Dashboard 1.14.9 + verified Next Node unsigned IPA
-run-name: "LX iOS | sing-box lx++ 1.14.9 (build 11) | Dashboard refresh | unsigned IPA"
+name: LX Dashboard 1.14.9 build 12 unsigned IPA
+run-name: "LX iOS | sing-box lx++ 1.14.9 (build 12) | Vertical routes | unsigned IPA"
 
 on:
   push:
@@ -33,8 +33,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin feature/lx-adaptive-health-ui
-          git -C clients/apple checkout --detach 29c20854c9bb21b6f0f7792e1f8fca90285b8b37
-          test "$(git -C clients/apple rev-parse HEAD)" = "29c20854c9bb21b6f0f7792e1f8fca90285b8b37"
+          git -C clients/apple checkout --detach a4bf337ecd9172e1e0bf06578116b258bfdc2ebb
+          test "$(git -C clients/apple rev-parse HEAD)" = "a4bf337ecd9172e1e0bf06578116b258bfdc2ebb"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -144,21 +144,21 @@ jobs:
       - name: Package unsigned IPA (for GBox signing)
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lxpp-v1.14.9-unsigned.ipa
+          rm -rf Payload SFI-lxpp-v1.14.9-b12-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
           APP_INFO="Payload/sing-box.app/Info.plist"
           APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO")
           test "$APP_VERSION" = "1.14.9"
-          test "$APP_BUILD" = "11"
+          test "$APP_BUILD" = "12"
           echo "Packaging sing-box lx++ $APP_VERSION ($APP_BUILD)"
-          zip -qry SFI-lxpp-v1.14.9-unsigned.ipa Payload
-          ls -lh SFI-lxpp-v1.14.9-unsigned.ipa
+          zip -qry SFI-lxpp-v1.14.9-b12-unsigned.ipa Payload
+          ls -lh SFI-lxpp-v1.14.9-b12-unsigned.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lxpp-v1.14.9-unsigned-ipa
-          path: clients/apple/build/SFI-lxpp-v1.14.9-unsigned.ipa
+          name: SFI-lxpp-v1.14.9-b12-unsigned-ipa
+          path: clients/apple/build/SFI-lxpp-v1.14.9-b12-unsigned.ipa
           compression-level: 1
