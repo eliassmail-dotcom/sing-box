@@ -8,13 +8,13 @@ import (
 
 func TestCommandSocketPath_DarwinPluginKitPluginContainer(t *testing.T) {
     base := "/var/mobile/Containers/Data/PluginKitPlugin/EDE70AC3-A2E3-4E0B-818F-08EFD7546806/Library/Application Support"
-    tmp := "/var/mobile/Containers/Data/PluginKitPlugin/EDE70AC3-A2E3-4E0B-818F-08EFD7546806/tmp"
+    tmp := "/private/var/mobile/Containers/Data/PluginKitPlugin/EDE70AC3-A2E3-4E0B-818F-08EFD7546806/tmp"
     for _, platform := range []string{"ios", "darwin"} {
         got, err := commandSocketPathFor(base, tmp, platform)
         if err != nil {
             t.Fatal(err)
         }
-        want := filepath.Join(tmp, "command.sock")
+        want := filepath.Join(tmp, "c.sock")
         if got != want {
             t.Fatalf("%s: expected fallback %q, got %q", platform, want, got)
         }
