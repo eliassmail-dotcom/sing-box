@@ -246,6 +246,23 @@ func TestFailover_moveOnDialFailure(t *testing.T) {
 	}
 	assertSelected(t, g, N.NetworkTCP, a)
 
+	// The initial HTTP probes run concurrently under -race. Scheduler jitter
+	// can invert observed RTTs (b=80ms, c=20ms), making a ranking assertion
+	// nondeterministic even though the production penalty selector is correct.
+	// Explicitly seed measured history for b/c after verifying the initial
+	// selection; test the failover ranking independently from probe scheduling.
+	for _, candidate := range []struct { tag string; delay uint16 }{
+		{"b", 80}, {"c", 20},
+	} {
+		history := g.history.LoadURLTestHistory(candidate.tag)
+		if history == nil {
+			t.Fatalf("expected initial probe history for %s", candidate.tag)
+		}
+		g.history.StoreURLTestHistory(candidate.tag, &adapter.URLTestHistory{
+			Time: history.Time, Delay: candidate.delay,
+		})
+	}
+
 	a.setErr(context.DeadlineExceeded)
 	g.history.DeleteURLTestHistory("a") // what DialContext does on a failed dial
 	conn, fallback, ok := g.penaltyFailoverDial(context.Background(), N.NetworkTCP, M.Socksaddr{}, a, context.DeadlineExceeded)
