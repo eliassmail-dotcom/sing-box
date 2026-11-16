@@ -1,10 +1,10 @@
-name: SFI LX Config Studio 1.3.1 DNS Summary unsigned IPA
-run-name: "LX iOS | Config Studio 1.3.1 DNS Summary | 1.14.9 (build 18) | unsigned IPA"
+name: SFI LX++ Astra Safety Fixes unsigned IPA
+run-name: "LX iOS | Astra Core+iOS Safety | 1.14.9 (build 19) | unsigned IPA"
 
 on:
   push:
     branches:
-      - ci/config-studio-dns-summary-1.3.1
+      - fix/astra-core-selection-safety-20261116
   workflow_dispatch:
 
 permissions:
@@ -32,9 +32,9 @@ jobs:
         run: |-
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
-          git -C clients/apple fetch --no-tags origin feature/config-studio-dns-summary-1.3.1
-          git -C clients/apple checkout --detach 2508f14a41615572be71b36325b8f434554ea91c
-          test "$(git -C clients/apple rev-parse HEAD)" = "2508f14a41615572be71b36325b8f434554ea91c"
+          git -C clients/apple fetch --no-tags origin fix/astra-ios-override-inheritance-20261116
+          git -C clients/apple checkout --detach a9d1551c602984054894b99a040be5e6db157f5d
+          test "$(git -C clients/apple rev-parse HEAD)" = "a9d1551c602984054894b99a040be5e6db157f5d"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -50,7 +50,7 @@ jobs:
       - name: Test LX adaptive health and Smart base-white priority
         run: |-
           go test ./protocol/group -run '^(TestLX|TestPriorityFallback_)' -count=1 -timeout=8m
-          go test -race ./protocol/group -run '^(TestPriorityFallback_SelectedOutboundReadWriteRace)
+          go test -race ./protocol/group -run '^TestPriorityFallback_SelectedOutboundReadWriteRace
 
       - name: Build Libbox.xcframework (ios/arm64 + simulator, with_clash_api via integration patch)
         run: |-
@@ -145,23 +145,23 @@ jobs:
       - name: Package unsigned IPA (for GBox signing)
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lxpp-v1.14.9-b18-ConfigStudio-DNS-Summary-unsigned.ipa
+          rm -rf Payload SFI-lxpp-v1.14.9-b19-Astra-Safety-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
           APP_INFO="Payload/sing-box.app/Info.plist"
           APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO")
           test "$APP_VERSION" = "1.14.9"
-          test "$APP_BUILD" = "18"
+          test "$APP_BUILD" = "19"
           echo "Packaging sing-box lx++ $APP_VERSION ($APP_BUILD)"
-          zip -qry SFI-lxpp-v1.14.9-b18-ConfigStudio-DNS-Summary-unsigned.ipa Payload
-          ls -lh SFI-lxpp-v1.14.9-b18-ConfigStudio-DNS-Summary-unsigned.ipa
+          zip -qry SFI-lxpp-v1.14.9-b19-Astra-Safety-unsigned.ipa Payload
+          ls -lh SFI-lxpp-v1.14.9-b19-Astra-Safety-unsigned.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lxpp-v1.14.9-b18-ConfigStudio-DNS-Summary-unsigned-ipa
-          path: clients/apple/build/SFI-lxpp-v1.14.9-b18-ConfigStudio-DNS-Summary-unsigned.ipa
+          name: SFI-lxpp-v1.14.9-b19-Astra-Safety-unsigned-ipa
+          path: clients/apple/build/SFI-lxpp-v1.14.9-b19-Astra-Safety-unsigned.ipa
           compression-level: 1
  -count=1 -timeout=8m
 
@@ -258,21 +258,21 @@ jobs:
       - name: Package unsigned IPA (for GBox signing)
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lxpp-v1.14.9-b18-ConfigStudio-DNS-Summary-unsigned.ipa
+          rm -rf Payload SFI-lxpp-v1.14.9-b19-Astra-Safety-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
           APP_INFO="Payload/sing-box.app/Info.plist"
           APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO")
           test "$APP_VERSION" = "1.14.9"
-          test "$APP_BUILD" = "18"
+          test "$APP_BUILD" = "19"
           echo "Packaging sing-box lx++ $APP_VERSION ($APP_BUILD)"
-          zip -qry SFI-lxpp-v1.14.9-b18-ConfigStudio-DNS-Summary-unsigned.ipa Payload
-          ls -lh SFI-lxpp-v1.14.9-b18-ConfigStudio-DNS-Summary-unsigned.ipa
+          zip -qry SFI-lxpp-v1.14.9-b19-Astra-Safety-unsigned.ipa Payload
+          ls -lh SFI-lxpp-v1.14.9-b19-Astra-Safety-unsigned.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lxpp-v1.14.9-b18-ConfigStudio-DNS-Summary-unsigned-ipa
-          path: clients/apple/build/SFI-lxpp-v1.14.9-b18-ConfigStudio-DNS-Summary-unsigned.ipa
+          name: SFI-lxpp-v1.14.9-b19-Astra-Safety-unsigned-ipa
+          path: clients/apple/build/SFI-lxpp-v1.14.9-b19-Astra-Safety-unsigned.ipa
           compression-level: 1
