@@ -115,6 +115,7 @@ jobs:
           done
           exit 1
 
+      # Libbox simulator is arm64-only; do not link its framework into x86_64.
       # b27 compiled Swift tests, then the hosted iOS Simulator service died
       # before any test case started. Compilation is required to publish IPA.
       - name: Compile SFUnitTests without booting a simulator (required)
@@ -126,7 +127,7 @@ jobs:
             -scheme SFI -configuration Debug \
             -only-testing:SFUnitTests \
             -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGN_IDENTITY=-
+            ARCHS=arm64 CODE_SIGN_IDENTITY=-
 
       - name: Archive SFI (unsigned)
         run: |-
@@ -216,7 +217,7 @@ jobs:
             -scheme SFI -configuration Debug \
             -only-testing:SFUnitTests \
             -destination "platform=iOS Simulator,name=$SIM" \
-            CODE_SIGN_IDENTITY=-
+            ARCHS=arm64 CODE_SIGN_IDENTITY=-
           STATUS=$?
           set -e
           if [ "$STATUS" -ne 0 ]; then
