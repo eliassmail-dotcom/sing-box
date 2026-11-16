@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -141,8 +140,11 @@ func dialTarget() (string, func(context.Context, string) (net.Conn, error)) {
 		}
 	}
 	if sCommandServerListenPort == 0 {
-		socketPath := filepath.Join(sBasePath, "command.sock")
+		socketPath, pathErr := commandSocketPath()
 		return "passthrough:///command-socket", func(ctx context.Context, _ string) (net.Conn, error) {
+			if pathErr != nil {
+				return nil, pathErr
+			}
 			var networkDialer net.Dialer
 			return networkDialer.DialContext(ctx, "unix", socketPath)
 		}
