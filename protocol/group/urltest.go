@@ -610,10 +610,11 @@ func (g *URLTestGroup) Select(network string) (adapter.Outbound, bool) {
 	return minOutbound, true
 }
 
-// selectPriority implements a two-tier URLTest: any responsive preferred outbound
-// wins over every fallback, irrespective of RTT. Within the winning tier, latency
-// and the configured tolerance still determine the candidate. No prior probe
-// means a conservative cold start on the first preferred outbound.
+// selectPriority implements a two-tier URLTest. Availability and tier are
+// evaluated first: a responsive preferred outbound always beats every fallback.
+// Within the winning tier, recent dial penalties rank candidates before RTT;
+// tolerance and hold then prevent unnecessary switches between equally healthy
+// candidates. A penalty never promotes White while any Base candidate responds.
 func (g *URLTestGroup) selectPriority(network string) (adapter.Outbound, bool) {
 	tcp, udp := g.selectedLx()
 	current := tcp
@@ -623,33 +624,57 @@ func (g *URLTestGroup) selectPriority(network string) (adapter.Outbound, bool) {
 	choose := func(preferred bool) (adapter.Outbound, bool) {
 		var best adapter.Outbound
 		var bestDelay uint16
-		if current != nil && g.priorityOutbounds[current.Tag()] == preferred && g.guardAllows(RealTag(current, network)) {
-			if supportsNetwork(current, network) {
-				if history := g.history.LoadURLTestHistory(RealTag(current, network)); history != nil {
-					best, bestDelay = current, history.Delay
-					if g.holdSelected(network, current) { return current, true }
-				}
-			}
-		}
+		var bestPenalty int64
 		for _, detour := range g.outbounds {
-			if g.priorityOutbounds[detour.Tag()] != preferred || !supportsNetwork(detour, network) || !g.guardAllows(RealTag(detour, network)) {
+			if g.priorityOutbounds[detour.Tag()] != preferred || !supportsNetwork(detour, network) {
 				continue
 			}
-			history := g.history.LoadURLTestHistory(RealTag(detour, network))
+			realTag := RealTag(detour, network)
+			if realTag == "" || !g.guardAllows(realTag) {
+				continue
+			}
+			history := g.history.LoadURLTestHistory(realTag)
 			if history == nil {
 				continue
 			}
-			if best == nil || g.fasterEnough(bestDelay, history.Delay) {
-				best, bestDelay = detour, history.Delay
+			penalty := g.penaltyOf(realTag)
+			if best == nil || penalty < bestPenalty ||
+				(penalty == bestPenalty && g.fasterEnough(bestDelay, history.Delay)) {
+				best, bestDelay, bestPenalty = detour, history.Delay, penalty
 			}
 		}
-		return best, best != nil
+		if best == nil {
+			return nil, false
+		}
+		// Hold only when the current node is at the best penalty level. A
+		// penalized current node must not pin the group to a worse candidate.
+		if current != nil && g.priorityOutbounds[current.Tag()] == preferred &&
+			supportsNetwork(current, network) && g.guardAllows(RealTag(current, network)) {
+			realTag := RealTag(current, network)
+			if history := g.history.LoadURLTestHistory(realTag); history != nil &&
+				g.penaltyOf(realTag) == bestPenalty {
+				if g.holdSelected(network, current) {
+					return current, true
+				}
+				if best != current && !g.fasterEnough(history.Delay, bestDelay) {
+					return current, true
+				}
+			}
+		}
+		return best, true
 	}
-	if best, ok := choose(true); ok { return best, true }
-	if best, ok := choose(false); ok { return best, true }
+	if best, ok := choose(true); ok {
+		return best, true
+	}
+	if best, ok := choose(false); ok {
+		return best, true
+	}
+	// Cold start: retain the documented tier order until a probe supplies
+	// health evidence; quarantine is still respected.
 	for _, preferred := range []bool{true, false} {
 		for _, detour := range g.outbounds {
-			if g.priorityOutbounds[detour.Tag()] == preferred && supportsNetwork(detour, network) && g.guardAllows(RealTag(detour, network)) {
+			if g.priorityOutbounds[detour.Tag()] == preferred &&
+				supportsNetwork(detour, network) && g.guardAllows(RealTag(detour, network)) {
 				return detour, false
 			}
 		}
@@ -882,29 +907,34 @@ func (g *URLTestGroup) performSelectionUpdate(reselect bool) {
 		selected bool
 		changed  bool // lx: SPEC 020 — ANY selection change (incl. nil→first) re-shapes the active tree
 	)
-	// lx: SPEC 054 — переизбор с учётом штрафов (в аварийном режиме — штрафы ↑, задержка ↑).
-	// lx: SPEC 116 — failover держит текущий узел (selectForUpdate).
-	if outbound, exists := g.selectForUpdate(N.NetworkTCP, reselect); outbound != nil && (g.selectedOutboundTCP == nil || ((exists || !g.guardAllows(RealTag(g.selectedOutboundTCP, N.NetworkTCP))) && outbound != g.selectedOutboundTCP)) {
-		if g.selectedOutboundTCP != nil {
-			updated = true
+	// Selection can also be moved by a live dial fallback. Snapshot reads and
+	// conditional writes use selectedAccess, never g.access/updateAccess as a
+	// substitute lock for selectedOutboundTCP/UDP.
+	if outbound, exists := g.selectForUpdate(N.NetworkTCP, reselect); outbound != nil {
+		previous, applied, changedNow := g.updateSelectedLx(N.NetworkTCP, outbound, exists)
+		if applied {
+			if previous != nil {
+				updated = true
+			}
+			if changedNow {
+				changed = true
+				g.noteSelectionChange(N.NetworkTCP)
+			}
+			selected = true
 		}
-		if outbound != g.selectedOutboundTCP {
-			changed = true
-			g.noteSelectionChange(N.NetworkTCP)
-		}
-		g.setSelectedTCPLx(outbound) // lx: SPEC 139
-		selected = true
 	}
-	if outbound, exists := g.selectForUpdate(N.NetworkUDP, reselect); outbound != nil && (g.selectedOutboundUDP == nil || ((exists || !g.guardAllows(RealTag(g.selectedOutboundUDP, N.NetworkUDP))) && outbound != g.selectedOutboundUDP)) {
-		if g.selectedOutboundUDP != nil {
-			updated = true
+	if outbound, exists := g.selectForUpdate(N.NetworkUDP, reselect); outbound != nil {
+		previous, applied, changedNow := g.updateSelectedLx(N.NetworkUDP, outbound, exists)
+		if applied {
+			if previous != nil {
+				updated = true
+			}
+			if changedNow {
+				changed = true
+				g.noteSelectionChange(N.NetworkUDP)
+			}
+			selected = true
 		}
-		if outbound != g.selectedOutboundUDP {
-			changed = true
-			g.noteSelectionChange(N.NetworkUDP)
-		}
-		g.setSelectedUDPLx(outbound) // lx: SPEC 139
-		selected = true
 	}
 	if updated {
 		g.interruptGroup.Interrupt(g.interruptExternalConnections)

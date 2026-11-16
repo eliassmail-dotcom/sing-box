@@ -2,6 +2,7 @@ package group
 
 import (
     "context"
+    "sync"
     "testing"
     "time"
 
@@ -86,6 +87,51 @@ func TestPriorityFallback_DialPickUsesPriorityAndNoInterruptFlag(t *testing.T) {
     g.history.StoreURLTestHistory("base", &adapter.URLTestHistory{Time:time.Now(), Delay:500})
     g.history.StoreURLTestHistory("white", &adapter.URLTestHistory{Time:time.Now(), Delay:10})
     if got := g.pickForDialNode(N.NetworkTCP); got == nil || got.Tag() != "base" { t.Fatalf("dial must prefer base, got %v", got) }
+}
+
+// Penalties are considered inside the preferred tier, but never promote White
+// while any Base candidate still has a successful probe.
+func TestPriorityFallback_PenaltyRankingWithinBaseTier(t *testing.T) {
+    baseFast := newFailoverNode("base-fast", 0)
+    baseStable := newFailoverNode("base-stable", 0)
+    white := newFailoverNode("white", 0)
+    g := newFailoverTestGroup(t, baseFast, baseStable, white)
+    g.failover = false
+    g.priorityOutbounds = map[string]bool{"base-fast": true, "base-stable": true}
+    for _, item := range []struct{ tag string; delay uint16 }{
+        {"base-fast", 10}, {"base-stable", 200}, {"white", 1},
+    } {
+        g.history.StoreURLTestHistory(item.tag, &adapter.URLTestHistory{Time: time.Now(), Delay: item.delay})
+    }
+    for i := 0; i < 5; i++ { g.penaltyAdd("base-fast") }
+    if got := g.pickForDialNode(N.NetworkTCP); got == nil || got.Tag() != "base-stable" {
+        t.Fatalf("Smart must select the healthier Base node, not the penalized fastest node or White; got %v", got)
+    }
+}
+
+// The selection fields have one lock domain even when a dial fallback races
+// with the normal dashboard/health readers.
+func TestPriorityFallback_SelectedOutboundReadWriteRace(t *testing.T) {
+    a := newFailoverNode("a", 0)
+    b := newFailoverNode("b", 0)
+    g := newFailoverTestGroup(t, a, b)
+    var wg sync.WaitGroup
+    wg.Add(2)
+    go func() {
+        defer wg.Done()
+        for i := 0; i < 10000; i++ {
+            g.moveSelection(N.NetworkTCP, a)
+            g.moveSelection(N.NetworkTCP, b)
+        }
+    }()
+    go func() {
+        defer wg.Done()
+        for i := 0; i < 20000; i++ {
+            g.selectedLx()
+            g.failoverHeld()
+        }
+    }()
+    wg.Wait()
 }
 
 func TestPriorityFallback_ConfigValidation(t *testing.T) {

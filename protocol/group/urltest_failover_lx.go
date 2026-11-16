@@ -33,12 +33,13 @@ import (
 // failoverHeld returns the held nodes (TCP selection, then UDP selection if it
 // differs). Empty before the first selection.
 func (g *URLTestGroup) failoverHeld() []adapter.Outbound {
+	tcp, udp := g.selectedLx()
 	held := make([]adapter.Outbound, 0, 2)
-	if g.selectedOutboundTCP != nil {
-		held = append(held, g.selectedOutboundTCP)
+	if tcp != nil {
+		held = append(held, tcp)
 	}
-	if g.selectedOutboundUDP != nil && g.selectedOutboundUDP != g.selectedOutboundTCP {
-		held = append(held, g.selectedOutboundUDP)
+	if udp != nil && udp != tcp {
+		held = append(held, udp)
 	}
 	return held
 }
@@ -125,10 +126,11 @@ func (g *URLTestGroup) failoverDegraded(node adapter.Outbound) bool {
 	if history == nil {
 		return false
 	}
+	tcp, udp := g.selectedLx()
 	for _, network := range []string{N.NetworkTCP, N.NetworkUDP} {
-		held := g.selectedOutboundTCP
+		held := tcp
 		if network == N.NetworkUDP {
-			held = g.selectedOutboundUDP
+			held = udp
 		}
 		if held != node {
 			continue
@@ -173,12 +175,10 @@ func (g *URLTestGroup) failoverSelect(network string, reselect bool) (adapter.Ou
 		}
 	}
 	if !reselect {
-		var current adapter.Outbound
-		switch network {
-		case N.NetworkTCP:
-			current = g.selectedOutboundTCP
-		case N.NetworkUDP:
-			current = g.selectedOutboundUDP
+		tcp, udp := g.selectedLx()
+		current := tcp
+		if network == N.NetworkUDP {
+			current = udp
 		}
 		if current != nil && g.guardAllows(RealTag(current, N.NetworkTCP)) {
 			if history := g.history.LoadURLTestHistory(RealTag(current, N.NetworkTCP)); history != nil {

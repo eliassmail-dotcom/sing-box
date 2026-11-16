@@ -210,12 +210,10 @@ func (g *URLTestGroup) pickForDialNode(network string) adapter.Outbound {
 			return best
 		}
 	}
-	var cached adapter.Outbound
-	switch network {
-	case N.NetworkTCP:
-		cached = g.selectedOutboundTCP
-	case N.NetworkUDP:
-		cached = g.selectedOutboundUDP
+	tcp, udp := g.selectedLx()
+	cached := tcp
+	if network == N.NetworkUDP {
+		cached = udp
 	}
 	if cached != nil && g.guardAllows(RealTag(cached, N.NetworkTCP)) {
 		return cached
@@ -228,7 +226,7 @@ func (g *URLTestGroup) pickForDialNode(network string) adapter.Outbound {
 // Без Interrupt: живые соединения не рвём; дерево достижимости (SPEC 020)
 // инвалидируется, как при любом переизборе.
 func (g *URLTestGroup) moveSelection(network string, detour adapter.Outbound) {
-	g.access.Lock()
+	g.selectedAccess.Lock()
 	var changed bool
 	switch network {
 	case N.NetworkTCP:
@@ -242,7 +240,7 @@ func (g *URLTestGroup) moveSelection(network string, detour adapter.Outbound) {
 			changed = true
 		}
 	}
-	g.access.Unlock()
+	g.selectedAccess.Unlock()
 	if changed {
 		g.noteSelectionChange(network)
 		g.logger.Info("lx penalty: selection moved to ", detour.Tag(), " (", network, ")")
