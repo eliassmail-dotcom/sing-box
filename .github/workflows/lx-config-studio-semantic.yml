@@ -33,8 +33,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin feature/config-studio-semantic-1.1
-          git -C clients/apple checkout --detach 5990780e6003d2c34fafe6a56790844b2a5a4592
-          test "$(git -C clients/apple rev-parse HEAD)" = "5990780e6003d2c34fafe6a56790844b2a5a4592"
+          git -C clients/apple checkout --detach 02790d71e6717627bdf452499046388f6bc64309
+          test "$(git -C clients/apple rev-parse HEAD)" = "02790d71e6717627bdf452499046388f6bc64309"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
