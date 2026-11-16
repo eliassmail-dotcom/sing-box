@@ -31,7 +31,9 @@ func commandSocketPathFor(basePath, tempDir, platform string) (string, error) {
         return primary, nil
     }
 
-    fallback := filepath.Join(tempDir, commandSocketFileName)
+    // Use a short basename as well: the /private/var alias may add eight
+    // bytes, so even tmp/command.sock can exceed Darwin's 103-byte limit.
+    fallback := filepath.Join(tempDir, "c.sock")
     if len([]byte(fallback)) > darwinSocketNameMaxBytes {
         return "", fmt.Errorf(
             "command socket path too long for Darwin: base=%d bytes, tmp=%d bytes (limit %d); short writable TMPDIR required",
