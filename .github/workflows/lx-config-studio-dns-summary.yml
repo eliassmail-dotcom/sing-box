@@ -1,10 +1,10 @@
-name: SFI LX++ Astra Safety Fixes unsigned IPA
-run-name: "LX iOS | Astra Core+iOS Safety | 1.14.9 (build 19) | unsigned IPA"
+name: SFI LX++ Astra Integrated Safety unsigned IPA
+run-name: "LX iOS | Astra Integrated | 1.14.9 (build 20) | unsigned IPA"
 
 on:
   push:
     branches:
-      - fix/astra-core-selection-safety-20261116
+      - fix/astra-integrated-build20-20261116
   workflow_dispatch:
 
 permissions:
@@ -32,11 +32,21 @@ jobs:
         run: |-
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
-          git -C clients/apple fetch --no-tags origin fix/astra-ios-override-inheritance-20261116
-          git -C clients/apple checkout --detach a9d1551c602984054894b99a040be5e6db157f5d
-          test "$(git -C clients/apple rev-parse HEAD)" = "a9d1551c602984054894b99a040be5e6db157f5d"
+          git -C clients/apple fetch --no-tags origin fix/astra-universal-configstudio-20261116
+          git -C clients/apple checkout --detach 5334e91dc54471bbb9103f447ae1840a045f899f
+          test "$(git -C clients/apple rev-parse HEAD)" = "5334e91dc54471bbb9103f447ae1840a045f899f"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
+
+      - name: Verify signing integration sources before compilation
+        run: |-
+          test -f clients/apple/Library/Shared/SignedEntitlements.swift
+          test -f clients/apple/FileProviderExtension/SignedEntitlements.swift
+          test -f clients/apple/WidgetExtension/SignedEntitlements.swift
+          test -f clients/apple/SFUnitTests/SigningCompatibilityTests.swift
+          grep -q 'hasSharedContainer' clients/apple/Library/Shared/FilePath.swift
+          grep -q 'hasSharedContainer' clients/apple/Library/Network/ExtensionProvider.swift
+          grep -q 'hasSharedContainer' clients/apple/Library/Network/ExtensionProfile.swift
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -49,7 +59,7 @@ jobs:
 
       - name: Test LX adaptive health and Smart base-white priority
         run: |-
-          go test ./protocol/group -run '^(TestLX|TestPriorityFallback_)' -count=1 -timeout=8m
+          go test -race ./protocol/group -count=1 -timeout=8m
           go test -race ./protocol/group -run '^TestPriorityFallback_SelectedOutboundReadWriteRace$' -count=1 -timeout=8m
 
       - name: Build Libbox.xcframework (ios/arm64 + simulator, with_clash_api via integration patch)
@@ -145,21 +155,42 @@ jobs:
       - name: Package unsigned IPA (for GBox signing)
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lxpp-v1.14.9-b19-Astra-Safety-unsigned.ipa
+          rm -rf Payload SFI-lxpp-v1.14.9-b20-Astra-Integrated-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
           APP_INFO="Payload/sing-box.app/Info.plist"
           APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO")
           test "$APP_VERSION" = "1.14.9"
-          test "$APP_BUILD" = "19"
+          test "$APP_BUILD" = "20"
           echo "Packaging sing-box lx++ $APP_VERSION ($APP_BUILD)"
-          zip -qry SFI-lxpp-v1.14.9-b19-Astra-Safety-unsigned.ipa Payload
-          ls -lh SFI-lxpp-v1.14.9-b19-Astra-Safety-unsigned.ipa
+          # Cross-target build consistency is mandatory for sideloaded IPA.
+          COUNT=0
+          while IFS= read -r plist; do
+            EXT_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")
+            echo "$plist = $EXT_BUILD"
+            test "$EXT_BUILD" = "20" || { echo "Extension build mismatch: $plist"; exit 1; }
+            COUNT=$((COUNT + 1))
+          done < <(find "Payload/sing-box.app/PlugIns" -name Info.plist -type f)
+          test "$COUNT" -ge 5
+          # Provenance manifest is included in the unsigned .app before signing.
+          cat > Payload/sing-box.app/LXBuildManifest.json <<EOF
+          {
+            "product": "SFI LX++",
+            "appVersion": "1.14.9",
+            "build": 20,
+            "appleCommit": "$(git -C .. rev-parse HEAD)",
+            "coreCommit": "${GITHUB_SHA}",
+            "embeddedGeneratorVersion": "v1.4.48r2",
+            "validation": ["full protocol/group go -race", "SFUnitTests", "target build consistency"]
+          }
+          EOF
+          zip -qry SFI-lxpp-v1.14.9-b20-Astra-Integrated-unsigned.ipa Payload
+          ls -lh SFI-lxpp-v1.14.9-b20-Astra-Integrated-unsigned.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lxpp-v1.14.9-b19-Astra-Safety-unsigned-ipa
-          path: clients/apple/build/SFI-lxpp-v1.14.9-b19-Astra-Safety-unsigned.ipa
+          name: SFI-lxpp-v1.14.9-b20-Astra-Integrated-unsigned-ipa
+          path: clients/apple/build/SFI-lxpp-v1.14.9-b20-Astra-Integrated-unsigned.ipa
           compression-level: 1
