@@ -1,5 +1,5 @@
-name: SFI LX++ iOS Command Socket Recovery unsigned IPA
-run-name: "LX iOS | Short Command Socket | 1.14.9 (build 24) | unsigned IPA"
+name: SFI LX++ iOS URLTest Recheck Recovery unsigned IPA
+run-name: "LX iOS | URLTest compatibility | 1.14.9 (build 25) | unsigned IPA"
 
 on:
   push:
@@ -32,9 +32,9 @@ jobs:
         run: |-
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
-          git -C clients/apple fetch --no-tags origin fix/sfi-command-socket-b24-20261116
-          git -C clients/apple checkout --detach f9ae9cddc909f50a031b42ed8c1dfcc612d1a636
-          test "$(git -C clients/apple rev-parse HEAD)" = "f9ae9cddc909f50a031b42ed8c1dfcc612d1a636"
+          git -C clients/apple fetch --no-tags origin fix/sfi-b24-recheck-mode-normalization-20261116
+          git -C clients/apple checkout --detach 769a4e204a24bec11c948e7a17668ee20393344a
+          test "$(git -C clients/apple rev-parse HEAD)" = "769a4e204a24bec11c948e7a17668ee20393344a"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -50,6 +50,8 @@ jobs:
           grep -q 'appendLimitedSubscriptionByte' clients/apple/ApplicationLibrary/LocalGenerator/LocalGeneratorEngine.swift
           grep -q 'webViewWebContentProcessDidTerminate' clients/apple/ApplicationLibrary/LocalGenerator/LocalGeneratorEngine.swift
           grep -q 'if tag == preferredFallbackTag { continue }' clients/apple/Library/Network/LXProfileOverrides.swift
+          grep -q 'disallowedFields' clients/apple/Library/Network/LXProfileOverrides.swift
+          grep -q 'testInheritedModeNormalizationWhenOtherOverrideChangesProfile' clients/apple/SFUnitTests/LXProfileOverridesTests.swift
           grep -q 'provisionedAppGroups' clients/apple/Library/Shared/SignedEntitlements.swift
           grep -q 'provisionedAppGroups' clients/apple/WidgetExtension/SignedEntitlements.swift
           grep -q 'signingDiagnostics' clients/apple/Library/Shared/AppConfiguration.swift
@@ -166,14 +168,14 @@ jobs:
       - name: Package unsigned IPA (for GBox signing)
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lxpp-v1.14.9-b24-Short-Socket-unsigned.ipa
+          rm -rf Payload SFI-lxpp-v1.14.9-b25-Mode-Normalized-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
           APP_INFO="Payload/sing-box.app/Info.plist"
           APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO")
           test "$APP_VERSION" = "1.14.9"
-          test "$APP_BUILD" = "24"
+          test "$APP_BUILD" = "25"
           echo "Packaging sing-box lx++ $APP_VERSION ($APP_BUILD)"
           # Cross-target build consistency is mandatory for sideloaded IPA.
           COUNT=0
@@ -203,14 +205,14 @@ jobs:
             "validation": ["full protocol/group go -race", "SFUnitTests", "target build consistency"]
           }
           EOF
-          zip -qry SFI-lxpp-v1.14.9-b24-Short-Socket-unsigned.ipa Payload
-          test -s SFI-lxpp-v1.14.9-b24-Short-Socket-unsigned.ipa
-          unzip -tq SFI-lxpp-v1.14.9-b24-Short-Socket-unsigned.ipa
-          ls -lh SFI-lxpp-v1.14.9-b24-Short-Socket-unsigned.ipa
+          zip -qry SFI-lxpp-v1.14.9-b25-Mode-Normalized-unsigned.ipa Payload
+          test -s SFI-lxpp-v1.14.9-b25-Mode-Normalized-unsigned.ipa
+          unzip -tq SFI-lxpp-v1.14.9-b25-Mode-Normalized-unsigned.ipa
+          ls -lh SFI-lxpp-v1.14.9-b25-Mode-Normalized-unsigned.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lxpp-v1.14.9-b24-Short-Socket-unsigned-ipa
-          path: clients/apple/build/SFI-lxpp-v1.14.9-b24-Short-Socket-unsigned.ipa
+          name: SFI-lxpp-v1.14.9-b25-Mode-Normalized-unsigned-ipa
+          path: clients/apple/build/SFI-lxpp-v1.14.9-b25-Mode-Normalized-unsigned.ipa
           compression-level: 1
