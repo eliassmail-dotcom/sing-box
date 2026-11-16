@@ -1,10 +1,10 @@
-name: SFI LX++ Astra Regression Fixes unsigned IPA
-run-name: "LX iOS | Astra Regression Fixes | 1.14.9 (build 22) | unsigned IPA"
+name: SFI LX++ Signing Recovery and Isolated Tunnel IPA
+run-name: "LX iOS | Signing Recovery | 1.14.9 (build 23) | unsigned IPA"
 
 on:
   push:
     branches:
-      - fix/astra-regression-build22-20261116
+      - fix/sfi-signing-fallback-build23-20261116
   workflow_dispatch:
 
 permissions:
@@ -32,9 +32,9 @@ jobs:
         run: |-
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
-          git -C clients/apple fetch --no-tags origin fix/astra-generator-bounds-20261116
-          git -C clients/apple checkout --detach e180f72364b041e15657b1ecc855df5182110ec2
-          test "$(git -C clients/apple rev-parse HEAD)" = "e180f72364b041e15657b1ecc855df5182110ec2"
+          git -C clients/apple fetch --no-tags origin fix/sfi-signing-transport-fallback-b23-20261116
+          git -C clients/apple checkout --detach 83171504446da2084aa34cdb0c40dfd3cd1cdbe2
+          test "$(git -C clients/apple rev-parse HEAD)" = "83171504446da2084aa34cdb0c40dfd3cd1cdbe2"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -50,6 +50,10 @@ jobs:
           grep -q 'appendLimitedSubscriptionByte' clients/apple/ApplicationLibrary/LocalGenerator/LocalGeneratorEngine.swift
           grep -q 'webViewWebContentProcessDidTerminate' clients/apple/ApplicationLibrary/LocalGenerator/LocalGeneratorEngine.swift
           grep -q 'if tag == preferredFallbackTag { continue }' clients/apple/Library/Network/LXProfileOverrides.swift
+          grep -q 'provisionedAppGroups' clients/apple/Library/Shared/SignedEntitlements.swift
+          grep -q 'provisionedAppGroups' clients/apple/WidgetExtension/SignedEntitlements.swift
+          grep -q 'signingDiagnostics' clients/apple/Library/Shared/AppConfiguration.swift
+          grep -q 'startVPNTunnel(options:)' clients/apple/Library/Network/ExtensionProfile.swift
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -158,14 +162,14 @@ jobs:
       - name: Package unsigned IPA (for GBox signing)
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lxpp-v1.14.9-b22-Astra-Regression-unsigned.ipa
+          rm -rf Payload SFI-lxpp-v1.14.9-b23-Signing-Recovery-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
           APP_INFO="Payload/sing-box.app/Info.plist"
           APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO")
           test "$APP_VERSION" = "1.14.9"
-          test "$APP_BUILD" = "22"
+          test "$APP_BUILD" = "23"
           echo "Packaging sing-box lx++ $APP_VERSION ($APP_BUILD)"
           # Cross-target build consistency is mandatory for sideloaded IPA.
           COUNT=0
@@ -188,21 +192,21 @@ jobs:
           {
             "product": "SFI LX++",
             "appVersion": "1.14.9",
-            "build": 22,
+            "build": 23,
             "appleCommit": "$(git -C .. rev-parse HEAD)",
             "coreCommit": "${GITHUB_SHA}",
             "embeddedGeneratorVersion": "v1.4.48r2",
             "validation": ["full protocol/group go -race", "SFUnitTests", "target build consistency"]
           }
           EOF
-          zip -qry SFI-lxpp-v1.14.9-b22-Astra-Regression-unsigned.ipa Payload
-          test -s SFI-lxpp-v1.14.9-b22-Astra-Regression-unsigned.ipa
-          unzip -tq SFI-lxpp-v1.14.9-b22-Astra-Regression-unsigned.ipa
-          ls -lh SFI-lxpp-v1.14.9-b22-Astra-Regression-unsigned.ipa
+          zip -qry SFI-lxpp-v1.14.9-b23-Signing-Recovery-unsigned.ipa Payload
+          test -s SFI-lxpp-v1.14.9-b23-Signing-Recovery-unsigned.ipa
+          unzip -tq SFI-lxpp-v1.14.9-b23-Signing-Recovery-unsigned.ipa
+          ls -lh SFI-lxpp-v1.14.9-b23-Signing-Recovery-unsigned.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lxpp-v1.14.9-b22-Astra-Regression-unsigned-ipa
-          path: clients/apple/build/SFI-lxpp-v1.14.9-b22-Astra-Regression-unsigned.ipa
+          name: SFI-lxpp-v1.14.9-b23-Signing-Recovery-unsigned-ipa
+          path: clients/apple/build/SFI-lxpp-v1.14.9-b23-Signing-Recovery-unsigned.ipa
           compression-level: 1
