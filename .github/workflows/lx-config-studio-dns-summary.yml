@@ -1,10 +1,10 @@
-name: SFI LX++ Astra Generator Hardening unsigned IPA
-run-name: "LX iOS | Astra Integrated+Generator | 1.14.9 (build 21) | unsigned IPA"
+name: SFI LX++ Astra Regression Fixes unsigned IPA
+run-name: "LX iOS | Astra Regression Fixes | 1.14.9 (build 22) | unsigned IPA"
 
 on:
   push:
     branches:
-      - fix/astra-generator-build21-20261116
+      - fix/astra-regression-build22-20261116
   workflow_dispatch:
 
 permissions:
@@ -33,8 +33,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin fix/astra-generator-bounds-20261116
-          git -C clients/apple checkout --detach 80f435f62041e7f3e6bb15867ebee7a7aa6fc59d
-          test "$(git -C clients/apple rev-parse HEAD)" = "80f435f62041e7f3e6bb15867ebee7a7aa6fc59d"
+          git -C clients/apple checkout --detach 1c23279a921f8e5cc482dbc32f314bf1d6e3e4bb
+          test "$(git -C clients/apple rev-parse HEAD)" = "1c23279a921f8e5cc482dbc32f314bf1d6e3e4bb"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -49,6 +49,7 @@ jobs:
           grep -q 'hasSharedContainer' clients/apple/Library/Network/ExtensionProfile.swift
           grep -q 'appendLimitedSubscriptionByte' clients/apple/ApplicationLibrary/LocalGenerator/LocalGeneratorEngine.swift
           grep -q 'webViewWebContentProcessDidTerminate' clients/apple/ApplicationLibrary/LocalGenerator/LocalGeneratorEngine.swift
+          grep -q 'if tag == preferredFallbackTag { continue }' clients/apple/Library/Network/LXProfileOverrides.swift
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -157,21 +158,21 @@ jobs:
       - name: Package unsigned IPA (for GBox signing)
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lxpp-v1.14.9-b21-Astra-Generator-unsigned.ipa
+          rm -rf Payload SFI-lxpp-v1.14.9-b22-Astra-Regression-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
           APP_INFO="Payload/sing-box.app/Info.plist"
           APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO")
           test "$APP_VERSION" = "1.14.9"
-          test "$APP_BUILD" = "21"
+          test "$APP_BUILD" = "22"
           echo "Packaging sing-box lx++ $APP_VERSION ($APP_BUILD)"
           # Cross-target build consistency is mandatory for sideloaded IPA.
           COUNT=0
           while IFS= read -r plist; do
             EXT_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")
             echo "$plist = $EXT_BUILD"
-            test "$EXT_BUILD" = "21" || { echo "Extension build mismatch: $plist"; exit 1; }
+            test "$EXT_BUILD" = "22" || { echo "Extension build mismatch: $plist"; exit 1; }
             COUNT=$((COUNT + 1))
           done < <(find "Payload/sing-box.app/PlugIns" -name Info.plist -type f)
           test "$COUNT" -ge 5
@@ -180,19 +181,19 @@ jobs:
           {
             "product": "SFI LX++",
             "appVersion": "1.14.9",
-            "build": 21,
+            "build": 22,
             "appleCommit": "$(git -C .. rev-parse HEAD)",
             "coreCommit": "${GITHUB_SHA}",
             "embeddedGeneratorVersion": "v1.4.48r2",
             "validation": ["full protocol/group go -race", "SFUnitTests", "target build consistency"]
           }
           EOF
-          zip -qry SFI-lxpp-v1.14.9-b21-Astra-Generator-unsigned.ipa Payload
-          ls -lh SFI-lxpp-v1.14.9-b21-Astra-Generator-unsigned.ipa
+          zip -qry SFI-lxpp-v1.14.9-b22-Astra-Regression-unsigned.ipa Payload
+          ls -lh SFI-lxpp-v1.14.9-b22-Astra-Regression-unsigned.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lxpp-v1.14.9-b21-Astra-Generator-unsigned-ipa
-          path: clients/apple/build/SFI-lxpp-v1.14.9-b21-Astra-Generator-unsigned.ipa
+          name: SFI-lxpp-v1.14.9-b22-Astra-Regression-unsigned-ipa
+          path: clients/apple/build/SFI-lxpp-v1.14.9-b22-Astra-Regression-unsigned.ipa
           compression-level: 1
