@@ -621,6 +621,7 @@ func (g *URLTestGroup) selectPriority(network string) (adapter.Outbound, bool) {
 	if network == N.NetworkUDP {
 		current = udp
 	}
+	penaltyAware := g.penaltyEmergency(network)
 	choose := func(preferred bool) (adapter.Outbound, bool) {
 		var best adapter.Outbound
 		var bestDelay uint16
@@ -637,7 +638,10 @@ func (g *URLTestGroup) selectPriority(network string) (adapter.Outbound, bool) {
 			if history == nil {
 				continue
 			}
-			penalty := g.penaltyOf(realTag)
+			penalty := int64(0)
+			if penaltyAware {
+				penalty = g.penaltyOf(realTag)
+			}
 			if best == nil || penalty < bestPenalty ||
 				(penalty == bestPenalty && g.fasterEnough(bestDelay, history.Delay)) {
 				best, bestDelay, bestPenalty = detour, history.Delay, penalty
@@ -651,8 +655,12 @@ func (g *URLTestGroup) selectPriority(network string) (adapter.Outbound, bool) {
 		if current != nil && g.priorityOutbounds[current.Tag()] == preferred &&
 			supportsNetwork(current, network) && g.guardAllows(RealTag(current, network)) {
 			realTag := RealTag(current, network)
+			currentPenalty := int64(0)
+			if penaltyAware {
+				currentPenalty = g.penaltyOf(realTag)
+			}
 			if history := g.history.LoadURLTestHistory(realTag); history != nil &&
-				g.penaltyOf(realTag) == bestPenalty {
+				currentPenalty == bestPenalty {
 				if g.holdSelected(network, current) {
 					return current, true
 				}

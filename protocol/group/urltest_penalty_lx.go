@@ -104,13 +104,28 @@ func (g *URLTestGroup) penaltyReset(tag string) {
 // fastestByDelay — узел с минимальной задержкой среди имеющих history: чистая
 // «скорость», без tolerance-гистерезиса и без привязки к текущему выбору.
 func (g *URLTestGroup) fastestByDelay(network string) adapter.Outbound {
+	// In a Smart priority group, evaluate the preferred tier first. A very fast
+	// White node must not hide repeated failures of the fastest still-healthy Base.
+	if len(g.priorityOutbounds) > 0 {
+		if best := g.fastestByDelayTier(network, true); best != nil {
+			return best
+		}
+		return g.fastestByDelayTier(network, false)
+	}
+	return g.fastestByDelayTier(network, false)
+}
+
+func (g *URLTestGroup) fastestByDelayTier(network string, preferred bool) adapter.Outbound {
 	var minDelay uint16
 	var minOutbound adapter.Outbound
 	for _, detour := range g.outbounds {
-		if !supportsNetwork(detour, network) || !g.guardAllows(RealTag(detour, N.NetworkTCP)) {
+		if len(g.priorityOutbounds) > 0 && g.priorityOutbounds[detour.Tag()] != preferred {
 			continue
 		}
-		history := g.history.LoadURLTestHistory(RealTag(detour, N.NetworkTCP))
+		if !supportsNetwork(detour, network) || !g.guardAllows(RealTag(detour, network)) {
+			continue
+		}
+		history := g.history.LoadURLTestHistory(RealTag(detour, network))
 		if history == nil {
 			continue
 		}
