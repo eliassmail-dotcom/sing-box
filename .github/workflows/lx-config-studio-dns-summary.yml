@@ -33,8 +33,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin feature/sfi-r5-offline-generator-b26-20261116
-          git -C clients/apple checkout --detach b8e39eea4a803a88d6c63abcc95d83ebd85b939b
-          test "$(git -C clients/apple rev-parse HEAD)" = "b8e39eea4a803a88d6c63abcc95d83ebd85b939b"
+          git -C clients/apple checkout --detach 52099f22b4297da20453473c466917374d542be6
+          test "$(git -C clients/apple rev-parse HEAD)" = "52099f22b4297da20453473c466917374d542be6"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
