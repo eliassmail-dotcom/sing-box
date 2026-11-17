@@ -4,7 +4,7 @@ run-name: "LX iOS | b32 File Provider signer compatibility | 1.14.9 (build 32) |
 on:
   push:
     branches:
-      - ci/ios-config-studio-r6-b32-snapshot-transaction-20261117
+      - ci/ios-config-studio-r6-b32-signer-preflight-20261117
   workflow_dispatch:
 
 permissions:
@@ -32,7 +32,7 @@ jobs:
         run: |-
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
-          git -C clients/apple fetch --no-tags origin fix/b32-snapshot-transaction-20261117
+          git -C clients/apple fetch --no-tags origin fix/b32-fileprovider-signer-compat
           git -C clients/apple checkout --detach 50253370eb081806d936187e742c035c2c826d4e
           test "$(git -C clients/apple rev-parse HEAD)" = "50253370eb081806d936187e742c035c2c826d4e"
           git -C clients/apple submodule update --init --recursive
