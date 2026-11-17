@@ -1,10 +1,10 @@
-name: SFI LX++ Config Studio r6 Read-Only unsigned IPA
-run-name: "LX iOS | r6 Config Studio DNS Schemes + Groups | 1.14.9 (build 28) | unsigned IPA"
+name: SFI LX++ b29 Astra review fixes
+run-name: "LX iOS | b29 Astra fixes + first-start reload | 1.14.9 (build 29) | unsigned IPA"
 
 on:
   push:
     branches:
-      - ci/ios-config-studio-r6-b28-20261117
+      - ci/ios-config-studio-r6-b29-astra-fixes-20261117
   workflow_dispatch:
 
 permissions:
@@ -32,9 +32,9 @@ jobs:
         run: |-
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
-          git -C clients/apple fetch --no-tags origin feat/config-studio-readonly-dns-mirror-r6-20261116
-          git -C clients/apple checkout --detach 4437edca687fb450661a5b282b181bc6b61f9e49
-          test "$(git -C clients/apple rev-parse HEAD)" = "4437edca687fb450661a5b282b181bc6b61f9e49"
+          git -C clients/apple fetch --no-tags origin fix/b29-astra-review-and-first-start
+          git -C clients/apple checkout --detach 7473112d87bfe6d4c9fc242262abd33f3ea2357b
+          test "$(git -C clients/apple rev-parse HEAD)" = "7473112d87bfe6d4c9fc242262abd33f3ea2357b"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -141,16 +141,17 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
 
       - name: Package unsigned IPA (for GBox signing)
+        id: package_ipa
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lxpp-v1.14.9-b28-r6-Config-Studio-unsigned.ipa
+          rm -rf Payload SFI-lxpp-v1.14.9-b29-r6-Config-Studio-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
           APP_INFO="Payload/sing-box.app/Info.plist"
           APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO")
           test "$APP_VERSION" = "1.14.9"
-          test "$APP_BUILD" = "28"
+          test "$APP_BUILD" = "29"
           echo "Packaging sing-box lx++ $APP_VERSION ($APP_BUILD)"
           # Cross-target build consistency is mandatory for sideloaded IPA.
           COUNT=0
@@ -173,29 +174,23 @@ jobs:
           {
             "product": "SFI LX++",
             "appVersion": "1.14.9",
-            "build": 28,
+            "build": 29,
             "appleCommit": "$(git -C .. rev-parse HEAD)",
             "coreCommit": "${GITHUB_SHA}",
             "embeddedGeneratorVersion": "v1.4.48r6",
-            "validation": ["full protocol/group go -race", "SFUnitTests compiled", "iOS archive", "target build consistency", "simulator runtime test attempted separately"]
+            "validation": ["full protocol/group go -race", "SFUnitTests compiled", "iOS archive", "target build consistency", "simulator runtime test acceptance gate"]
           }
           EOF
-          zip -qry SFI-lxpp-v1.14.9-b28-r6-Config-Studio-unsigned.ipa Payload
-          test -s SFI-lxpp-v1.14.9-b28-r6-Config-Studio-unsigned.ipa
-          unzip -tq SFI-lxpp-v1.14.9-b28-r6-Config-Studio-unsigned.ipa
-          ls -lh SFI-lxpp-v1.14.9-b28-r6-Config-Studio-unsigned.ipa
+          zip -qry SFI-lxpp-v1.14.9-b29-r6-Config-Studio-unsigned.ipa Payload
+          test -s SFI-lxpp-v1.14.9-b29-r6-Config-Studio-unsigned.ipa
+          unzip -tq SFI-lxpp-v1.14.9-b29-r6-Config-Studio-unsigned.ipa
+          ls -lh SFI-lxpp-v1.14.9-b29-r6-Config-Studio-unsigned.ipa
 
-      - name: Upload IPA artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: SFI-lxpp-v1.14.9-b28-r6-Config-Studio-unsigned-ipa
-          path: clients/apple/build/SFI-lxpp-v1.14.9-b28-r6-Config-Studio-unsigned.ipa
-          compression-level: 1
-      
-      - name: Run SFUnitTests on hosted simulator (diagnostic)
+      # The IPA can be built even if Apple's hosted simulator is unavailable,
+      # but such an artifact must never appear as a VERIFIED release.
+      - name: Run SFUnitTests on hosted simulator (acceptance gate)
         id: simulator_tests
-        continue-on-error: true
-        timeout-minutes: 8
+        timeout-minutes: 15
         run: |-
           SIM=$(xcrun simctl list devices available -j | python3 -c "
           import json,sys
@@ -208,7 +203,6 @@ jobs:
           ")
           echo "Using simulator: $SIM"
           cd clients/apple
-          set +e
           rm -rf build/LXTests.xcresult
           xcodebuild test -skipPackagePluginValidation \
             -resultBundlePath "$PWD/build/LXTests.xcresult" \
@@ -218,19 +212,35 @@ jobs:
             -only-testing:SFUnitTests \
             -destination "platform=iOS Simulator,name=$SIM" \
             ARCHS=arm64 CODE_SIGN_IDENTITY=-
-          STATUS=$?
-          set -e
-          if [ "$STATUS" -ne 0 ]; then
-            echo "::warning::Hosted iOS simulator tests did not finish. IPA was archived; see XCTest diagnostics."
-            xcrun xcresulttool get test-results summary --path build/LXTests.xcresult || true
-          fi
-          exit "$STATUS"
+          # Exit 0 alone is insufficient: reject zero tests or missing results.
+          xcrun xcresulttool get test-results summary --path build/LXTests.xcresult --format json > build/XCTestSummary.json
+          python3 - <<'PY'
+          import json
+          with open('build/XCTestSummary.json',encoding='utf-8') as f: j=json.load(f)
+          total=j.get('totalTestCount',0)
+          fails=j.get('failedTests',0)
+          status=j.get('result','')
+          print(f"XCTest summary: {total} tests; {fails} failures; result={status}")
+          if total < 1 or fails != 0 or status not in ('Passed','Success'):
+              raise SystemExit("XCTest not completed and passed")
+          PY
 
-      - name: Upload XCTest diagnostics if simulator fails
-        if: steps.simulator_tests.outcome == 'failure'
+      - name: Upload XCTest evidence
+        if: ${{ always() && steps.simulator_tests.outcome != 'skipped' }}
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lx-b28-simulator-test-results
-          path: clients/apple/build/LXTests.xcresult
-          retention-days: 4
+          name: SFI-lx-b29-xctest-evidence
+          path: |
+            clients/apple/build/LXTests.xcresult
+            clients/apple/build/XCTestSummary.json
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 1
+
+      - name: Upload IPA artifact (explicit validation status)
+        if: ${{ always() && steps.package_ipa.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: SFI-lxpp-v1.14.9-b29-r6-${{ steps.simulator_tests.outcome == 'success' && 'XCTEST-PASSED' || 'BUILD-ONLY-UNVERIFIED' }}-unsigned-ipa
+          path: clients/apple/build/SFI-lxpp-v1.14.9-b29-r6-Config-Studio-unsigned.ipa
           compression-level: 1
