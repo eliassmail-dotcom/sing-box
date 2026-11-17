@@ -33,8 +33,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin fix/b29-astra-review-and-first-start
-          git -C clients/apple checkout --detach 7473112d87bfe6d4c9fc242262abd33f3ea2357b
-          test "$(git -C clients/apple rev-parse HEAD)" = "7473112d87bfe6d4c9fc242262abd33f3ea2357b"
+          git -C clients/apple checkout --detach d2faf2be1f4e32f7249607732d7011e0405dd8a8
+          test "$(git -C clients/apple rev-parse HEAD)" = "d2faf2be1f4e32f7249607732d7011e0405dd8a8"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
