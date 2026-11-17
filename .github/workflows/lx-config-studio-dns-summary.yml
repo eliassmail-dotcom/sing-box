@@ -33,8 +33,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin fix/b32-fileprovider-signer-compat
-          git -C clients/apple checkout --detach 50253370eb081806d936187e742c035c2c826d4e
-          test "$(git -C clients/apple rev-parse HEAD)" = "50253370eb081806d936187e742c035c2c826d4e"
+          git -C clients/apple checkout --detach b47b42f5daebe94426beb6c160e38ab30b9f1d48
+          test "$(git -C clients/apple rev-parse HEAD)" = "b47b42f5daebe94426beb6c160e38ab30b9f1d48"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
