@@ -1,10 +1,10 @@
-name: SFI LX++ b29 Astra review fixes
-run-name: "LX iOS | b29 Astra fixes + first-start reload | 1.14.9 (build 29) | unsigned IPA"
+name: SFI LX++ b30 first-start diagnostics
+run-name: "LX iOS | b30 first-start diagnostics | 1.14.9 (build 30) | unsigned IPA"
 
 on:
   push:
     branches:
-      - ci/ios-config-studio-r6-b29-astra-fixes-20261117
+      - ci/ios-config-studio-r6-b30-first-start-diagnostics-20261117
   workflow_dispatch:
 
 permissions:
@@ -32,9 +32,9 @@ jobs:
         run: |-
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
-          git -C clients/apple fetch --no-tags origin fix/b29-astra-review-and-first-start
-          git -C clients/apple checkout --detach 8a1a9f4a4c75bb87d98ccaf9f79509ea3cb258d6
-          test "$(git -C clients/apple rev-parse HEAD)" = "8a1a9f4a4c75bb87d98ccaf9f79509ea3cb258d6"
+          git -C clients/apple fetch --no-tags origin fix/b30-first-start-diagnostics
+          git -C clients/apple checkout --detach 681770c16e8ceed5ae6012c3fa9e989aebaf259a
+          test "$(git -C clients/apple rev-parse HEAD)" = "681770c16e8ceed5ae6012c3fa9e989aebaf259a"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -66,6 +66,9 @@ jobs:
           grep -q 'provisionedAppGroups' clients/apple/WidgetExtension/SignedEntitlements.swift
           grep -q 'signingDiagnostics' clients/apple/Library/Shared/AppConfiguration.swift
           grep -q 'startVPNTunnel(options:)' clients/apple/Library/Network/ExtensionProfile.swift
+          grep -q 'VPNStartStage' clients/apple/Library/Network/ExtensionProfile.swift
+          grep -q 'Last disconnect:' clients/apple/Library/Network/ExtensionProfile.swift
+          grep -q 'VPN diagnostics' clients/apple/Library/Network/ExtensionProfile.swift
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -144,14 +147,14 @@ jobs:
         id: package_ipa
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lxpp-v1.14.9-b29-r6-Config-Studio-unsigned.ipa
+          rm -rf Payload SFI-lxpp-v1.14.9-b30-r6-Config-Studio-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
           APP_INFO="Payload/sing-box.app/Info.plist"
           APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO")
           test "$APP_VERSION" = "1.14.9"
-          test "$APP_BUILD" = "29"
+          test "$APP_BUILD" = "30"
           echo "Packaging sing-box lx++ $APP_VERSION ($APP_BUILD)"
           # Cross-target build consistency is mandatory for sideloaded IPA.
           COUNT=0
@@ -174,17 +177,17 @@ jobs:
           {
             "product": "SFI LX++",
             "appVersion": "1.14.9",
-            "build": 29,
+            "build": 30,
             "appleCommit": "$(git -C .. rev-parse HEAD)",
             "coreCommit": "${GITHUB_SHA}",
             "embeddedGeneratorVersion": "v1.4.48r6",
             "validation": ["full protocol/group go -race", "SFUnitTests compiled", "iOS archive", "target build consistency", "simulator runtime test acceptance gate"]
           }
           EOF
-          zip -qry SFI-lxpp-v1.14.9-b29-r6-Config-Studio-unsigned.ipa Payload
-          test -s SFI-lxpp-v1.14.9-b29-r6-Config-Studio-unsigned.ipa
-          unzip -tq SFI-lxpp-v1.14.9-b29-r6-Config-Studio-unsigned.ipa
-          ls -lh SFI-lxpp-v1.14.9-b29-r6-Config-Studio-unsigned.ipa
+          zip -qry SFI-lxpp-v1.14.9-b30-r6-Config-Studio-unsigned.ipa Payload
+          test -s SFI-lxpp-v1.14.9-b30-r6-Config-Studio-unsigned.ipa
+          unzip -tq SFI-lxpp-v1.14.9-b30-r6-Config-Studio-unsigned.ipa
+          ls -lh SFI-lxpp-v1.14.9-b30-r6-Config-Studio-unsigned.ipa
 
       # The IPA can be built even if Apple's hosted simulator is unavailable,
       # but such an artifact must never appear as a VERIFIED release.
@@ -229,7 +232,7 @@ jobs:
         if: ${{ always() && steps.simulator_tests.outcome != 'skipped' }}
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lx-b29-xctest-evidence
+          name: SFI-lx-b30-xctest-evidence
           path: |
             clients/apple/build/LXTests.xcresult
             clients/apple/build/XCTestSummary.json
@@ -241,6 +244,6 @@ jobs:
         if: ${{ always() && steps.package_ipa.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lxpp-v1.14.9-b29-r6-${{ steps.simulator_tests.outcome == 'success' && 'XCTEST-PASSED' || 'BUILD-ONLY-UNVERIFIED' }}-unsigned-ipa
-          path: clients/apple/build/SFI-lxpp-v1.14.9-b29-r6-Config-Studio-unsigned.ipa
+          name: SFI-lxpp-v1.14.9-b30-r6-${{ steps.simulator_tests.outcome == 'success' && 'XCTEST-PASSED' || 'BUILD-ONLY-UNVERIFIED' }}-unsigned-ipa
+          path: clients/apple/build/SFI-lxpp-v1.14.9-b30-r6-Config-Studio-unsigned.ipa
           compression-level: 1
