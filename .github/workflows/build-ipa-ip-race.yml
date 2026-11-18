@@ -1,0 +1,126 @@
+name: Build SFI IPA (experimental TCP multi-IP race)
+
+on:
+  push:
+    branches:
+      - feature/lx-ip-race
+    paths:
+      - common/dialer/**
+      - option/outbound.go
+      - protocol/vless/outbound.go
+      - clients/apple
+      - .github/workflows/build-ipa-ip-race.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-ipa-ip-race
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Libbox + SFI unsigned IPA (TCP IP race)
+    runs-on: xcode-27
+    timeout-minutes: 90
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - name: Checkout experimental LX sources
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Init pinned Apple client
+        run: |-
+          git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
+          git submodule update --init --recursive
+          git -C clients/apple fetch --no-tags origin feature/lx-runtime-settings
+          git -C clients/apple checkout --detach 672097059d7a0743056162645856acc423d09be5
+          test "$(git -C clients/apple rev-parse HEAD)" = "672097059d7a0743056162645856acc423d09be5"
+          git -C clients/apple submodule update --init --recursive
+          git -C clients/apple rev-parse HEAD
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.10
+          cache: false
+
+      - name: Patch Go for iOS
+        run: .github/patch_go_for_ios.sh
+
+      - name: Verify experimental TCP IP-race tests
+        run: |-
+          go test -count=1 -timeout=12m ./common/dialer/ -run '^TestLXIPRace'
+          go test -count=1 -timeout=8m ./protocol/vless/
+
+      - name: Build Libbox.xcframework from this exact branch
+        run: |-
+          make lib_install
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          git tag v1.14.4-lx.33 -f
+          go run ./cmd/internal/build_libbox -target apple -platform ios/arm64,iossimulator/arm64
+          rm -rf clients/apple/Libbox.xcframework
+          cp -R Libbox.xcframework clients/apple/Libbox.xcframework
+
+      - name: Verify new option is in the generated Libbox API source
+        run: |-
+          grep -R -n 'tcp_concurrent' option common/dialer | head -30
+          test -d clients/apple/Libbox.xcframework/ios-arm64/Libbox.framework
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Run SFUnitTests (iOS simulator)
+        run: |-
+          SIM=$(xcrun simctl list devices available -j | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)
+          for dev in d['devices'].values():
+              for x in dev:
+                  if x['isAvailable'] and x['name'].startswith('iPhone'):
+                      print(x['name']); raise SystemExit
+          sys.exit(1)
+          ")
+          echo "Using simulator: $SIM"
+          cd clients/apple
+          set +e
+          xcodebuild test -skipPackagePluginValidation             -scheme SFI -configuration Debug             -only-testing:SFUnitTests             -destination "platform=iOS Simulator,name=$SIM"             CODE_SIGN_IDENTITY=-
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            echo "--- recent simulator crash reports ---"
+            for f in $(ls -t ~/Library/Logs/DiagnosticReports/*.ips 2>/dev/null | head -3); do
+              echo "=== $f"
+              head -c 3000 "$f"
+              echo
+            done
+          fi
+          exit $STATUS
+
+      - name: Archive SFI (unsigned)
+        run: |-
+          cd clients/apple
+          rm -rf build/SFI.xcarchive
+          xcodebuild archive -skipPackagePluginValidation             -scheme SFI -configuration Release             -destination 'generic/platform=iOS'             -archivePath build/SFI.xcarchive             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+      - name: Package unsigned IPA for GBox
+        run: |-
+          cd clients/apple/build
+          rm -rf Payload SFI-lx-ip-race-unsigned.ipa
+          mkdir Payload
+          cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
+          zip -qry SFI-lx-ip-race-unsigned.ipa Payload
+          ls -lh SFI-lx-ip-race-unsigned.ipa
+          shasum -a 256 SFI-lx-ip-race-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SFI-lx-ip-race-unsigned-ipa
+          path: clients/apple/build/SFI-lx-ip-race-unsigned.ipa
+          compression-level: 1
+          if-no-files-found: error
+          retention-days: 14
