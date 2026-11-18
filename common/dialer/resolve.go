@@ -145,6 +145,15 @@ func (d *resolveDialer) QueryOptions() adapter.DNSQueryOptions {
 	return d.queryOptions
 }
 
+// ResetTCPConcurrentHistory clears transient IP preferences after a Wi-Fi,
+// cellular or routing-interface change. The embedded parallel resolve dialer
+// inherits this method.
+func (d *resolveDialer) ResetTCPConcurrentHistory() {
+    if d.ipRace != nil {
+        d.ipRace.resetHistory()
+    }
+}
+
 func (d *resolveDialer) Upstream() any {
 	return d.dialer
 }
