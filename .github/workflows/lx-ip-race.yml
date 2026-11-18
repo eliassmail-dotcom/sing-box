@@ -7,6 +7,7 @@ on:
     paths:
       - common/dialer/**
       - option/outbound.go
+      - protocol/vless/outbound.go
       - .github/workflows/lx-ip-race.yml
   workflow_dispatch:
 
@@ -36,11 +37,12 @@ jobs:
       - name: Format ported files
         run: |
           gofmt -w common/dialer/tcp_concurrent_lx.go common/dialer/tcp_concurrent_lx_test.go \
-            common/dialer/resolve.go common/dialer/dialer.go option/outbound.go
+            common/dialer/resolve.go common/dialer/dialer.go option/outbound.go \
+            protocol/vless/outbound.go
       - name: Run TCP race and existing dialer tests with race detector
         run: |
           go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' \
-            ./common/dialer/ ./option/
+            ./common/dialer/ ./option/ ./protocol/vless/
       - name: Build sing-box-LX CLI
         run: |
           make -f Makefile.lx lx-build LX_OUTPUT=sing-box
@@ -49,11 +51,12 @@ jobs:
         run: |
           if ! git diff --quiet -- common/dialer/tcp_concurrent_lx.go \
             common/dialer/tcp_concurrent_lx_test.go common/dialer/resolve.go \
-            common/dialer/dialer.go option/outbound.go; then
+            common/dialer/dialer.go option/outbound.go protocol/vless/outbound.go; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add common/dialer/tcp_concurrent_lx.go common/dialer/tcp_concurrent_lx_test.go \
-              common/dialer/resolve.go common/dialer/dialer.go option/outbound.go
+              common/dialer/resolve.go common/dialer/dialer.go option/outbound.go \
+              protocol/vless/outbound.go
             git commit -m "style(lx): gofmt tested IP-race experiment"
             git push origin HEAD:feature/lx-ip-race
           fi
