@@ -93,6 +93,8 @@ type AbstractDialerOptions struct {
 	NetNs                      string                            `json:"netns,omitempty" reference:"network_namespace"`
 	ConnectTimeout             badoption.Duration                `json:"connect_timeout,omitempty"`
 	TCPFastOpen                bool                              `json:"tcp_fast_open,omitempty"`
+	// LX: opt-in concurrent IPv4/IPv6 socket racing for a domain server.
+	TCPConcurrent              bool                              `json:"tcp_concurrent,omitempty"`
 	TCPMultiPath               bool                              `json:"tcp_multi_path,omitempty"`
 	DisableTCPKeepAlive        bool                              `json:"disable_tcp_keep_alive,omitempty"`
 	TCPKeepAlive               badoption.Duration                `json:"tcp_keep_alive,omitempty"`
