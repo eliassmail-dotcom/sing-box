@@ -211,7 +211,49 @@ func (d *defaultDialer) DialTLSContext(ctx context.Context, destination M.Socksa
 }
 
 func (d *defaultDialer) dialContext(ctx context.Context, destination M.Socksaddr, echRetry bool) (Conn, error) {
-	conn, err := d.dialer.DialContext(ctx, N.NetworkTCP, destination)
+    // LX experimental authenticated IP race. The resolver tries each A/AAAA
+    // record with a fresh TLS config and only caches the address once the
+    // ENTIRE handshake succeeds, including REALITY's proof of authenticity.
+    // Ordinary profiles, IP-literal endpoints and detours use the original
+    // unchanged path below. DialVerifiedTCP is deliberately optional.
+    if verifiedDialer, ok := d.dialer.(interface {
+        IPRaceEnabled() bool
+        DialVerifiedTCP(context.Context, M.Socksaddr, func(context.Context, net.Conn) (net.Conn, error)) (net.Conn, error)
+    }); ok && verifiedDialer.IPRaceEnabled() && destination.IsDomain() {
+        verifiedConn, raceErr := verifiedDialer.DialVerifiedTCP(ctx, destination,
+            func(attemptCtx context.Context, raw net.Conn) (net.Conn, error) {
+                // REALITY/uTLS configs contain per-handshake state. Do not
+                // share it between concurrent ClientHello attempts.
+                config := d.config.Clone()
+                handshakeCtx, stage := beginHandshakeLx(attemptCtx, config)
+                tlsConn, err := aTLS.ClientHandshake(handshakeCtx, raw, config)
+                endHandshakeLx(handshakeCtx, stage, tlsConn, err)
+                if err != nil {
+                    return nil, err
+                }
+                return tlsConn, nil
+            })
+        if raceErr != nil {
+            // Preserve ECH retry behavior if every candidate failed due to
+            // an ECH rejection, just as the original dialContext does.
+            var echErr *tls.ECHRejectionError
+            if echRetry && errors.As(raceErr, &echErr) && len(echErr.RetryConfigList) > 0 {
+                if echConfig, isECH := d.config.(ECHCapableConfig); isECH {
+                    echConfig.SetECHConfigList(echErr.RetryConfigList)
+                    return d.dialContext(ctx, destination, false)
+                }
+            }
+            return nil, raceErr
+        }
+        tlsConn, ok := verifiedConn.(Conn)
+        if !ok {
+            _ = verifiedConn.Close()
+            return nil, errors.New("tcp_concurrent: verified stream does not implement TLS Conn")
+        }
+        return tlsConn, nil
+    }
+
+    conn, err := d.dialer.DialContext(ctx, N.NetworkTCP, destination)
 	if err != nil {
 		return nil, err
 	}
