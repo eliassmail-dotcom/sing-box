@@ -83,6 +83,10 @@ func (d *resolveDialer) DialVerifiedTCP(
                 _ = conn.Close()
                 return nil, errors.New("tcp_concurrent: verifier returned nil connection")
             }
+            if err := attemptCtx.Err(); err != nil {
+                _ = verified.Close()
+                return nil, err
+            }
             return verified, nil
         })
 }
