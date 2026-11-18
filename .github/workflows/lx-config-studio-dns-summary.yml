@@ -1,10 +1,10 @@
-name: SFI LX++ b32 File Provider signer compatibility
-run-name: "LX iOS | b32 File Provider signer compatibility | 1.14.9 (build 32) | unsigned IPA"
+name: SFI LX++ b33 native Files fallback and VPN start recovery
+run-name: "LX iOS | b33 native Files fallback & first-start recovery | 1.14.9 (build 33) | unsigned IPA"
 
 on:
   push:
     branches:
-      - ci/ios-config-studio-r6-b32-signer-preflight-20261117
+      - ci/ios-config-studio-r6-b33-native-files-start-recovery-20261118
   workflow_dispatch:
 
 permissions:
@@ -32,9 +32,9 @@ jobs:
         run: |-
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
-          git -C clients/apple fetch --no-tags origin fix/b32-fileprovider-signer-compat
-          git -C clients/apple checkout --detach b47b42f5daebe94426beb6c160e38ab30b9f1d48
-          test "$(git -C clients/apple rev-parse HEAD)" = "b47b42f5daebe94426beb6c160e38ab30b9f1d48"
+          git -C clients/apple fetch --no-tags origin fix/b33-native-files-and-vpn-start-recovery
+          git -C clients/apple checkout --detach 603a27186f1be199cafb31c8c8735d5f0070bb86
+          test "$(git -C clients/apple rev-parse HEAD)" = "603a27186f1be199cafb31c8c8735d5f0070bb86"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -73,6 +73,11 @@ jobs:
           grep -q 'writeSnapshot(' clients/apple/Library/Network/ExtensionStartOptions.swift
           grep -q 'Darwin.flock' clients/apple/Library/Network/ExtensionStartOptions.swift
           test -f clients/apple/scripts/verify_unsigned_ipa.py
+          test -f clients/apple/scripts/prepare_ipa_for_signer.py
+          python3 -m py_compile clients/apple/scripts/prepare_ipa_for_signer.py
+          grep -q '<key>UIFileSharingEnabled</key>' clients/apple/SFI/Info.plist
+          grep -q '<key>LSSupportsOpeningDocumentsInPlace</key>' clients/apple/SFI/Info.plist
+          grep -q 'connectWithOneSessionRecovery' clients/apple/Library/Network/ExtensionProfile.swift
           grep -q 'NSExtensionFileProviderDocumentGroup' clients/apple/FileProviderExtension/FileProviderExtension.swift
           ! grep -q 'applicationSupportDirectory' clients/apple/FileProviderExtension/FileProviderExtension.swift
           grep -q 'testDesiredSnapshotRejectsStaleRollbackWhenOnlyNonConfigOptionChanged' clients/apple/SFUnitTests/LXProfileOverridesTests.swift
@@ -155,14 +160,14 @@ jobs:
         id: package_ipa
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lxpp-v1.14.9-b32-r6-Config-Studio-unsigned.ipa
+          rm -rf Payload SFI-lxpp-v1.14.9-b33-r6-Config-Studio-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
           APP_INFO="Payload/sing-box.app/Info.plist"
           APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO")
           test "$APP_VERSION" = "1.14.9"
-          test "$APP_BUILD" = "32"
+          test "$APP_BUILD" = "33"
           echo "Packaging sing-box lx++ $APP_VERSION ($APP_BUILD)"
           # Cross-target build consistency is mandatory for sideloaded IPA.
           COUNT=0
@@ -185,21 +190,21 @@ jobs:
           {
             "product": "SFI LX++",
             "appVersion": "1.14.9",
-            "build": 32,
+            "build": 33,
             "appleCommit": "$(git -C .. rev-parse HEAD)",
             "coreCommit": "${GITHUB_SHA}",
             "embeddedGeneratorVersion": "v1.4.48r6",
             "validation": ["full protocol/group go -race", "SFUnitTests compiled", "iOS archive", "target build consistency", "simulator runtime test acceptance gate"]
           }
           EOF
-          zip -qry SFI-lxpp-v1.14.9-b32-r6-Config-Studio-unsigned.ipa Payload
-          test -s SFI-lxpp-v1.14.9-b32-r6-Config-Studio-unsigned.ipa
-          unzip -tq SFI-lxpp-v1.14.9-b32-r6-Config-Studio-unsigned.ipa
+          zip -qry SFI-lxpp-v1.14.9-b33-r6-Config-Studio-unsigned.ipa Payload
+          test -s SFI-lxpp-v1.14.9-b33-r6-Config-Studio-unsigned.ipa
+          unzip -tq SFI-lxpp-v1.14.9-b33-r6-Config-Studio-unsigned.ipa
           # Fail before publishing an IPA whose extension IDs, App Groups or
           # static File Provider Document Group are inconsistent. This does not
           # validate the signed identities that GBox chooses later.
-          python3 ../scripts/verify_unsigned_ipa.py SFI-lxpp-v1.14.9-b32-r6-Config-Studio-unsigned.ipa --build 32 | tee signing-preflight.json
-          ls -lh SFI-lxpp-v1.14.9-b32-r6-Config-Studio-unsigned.ipa
+          python3 ../scripts/verify_unsigned_ipa.py SFI-lxpp-v1.14.9-b33-r6-Config-Studio-unsigned.ipa --build 33 | tee signing-preflight.json
+          ls -lh SFI-lxpp-v1.14.9-b33-r6-Config-Studio-unsigned.ipa
 
       # The IPA can be built even if Apple's hosted simulator is unavailable,
       # but such an artifact must never appear as a VERIFIED release.
@@ -244,7 +249,7 @@ jobs:
         if: ${{ always() && steps.simulator_tests.outcome != 'skipped' }}
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lx-b32-xctest-evidence
+          name: SFI-lx-b33-xctest-evidence
           path: |
             clients/apple/build/LXTests.xcresult
             clients/apple/build/XCTestSummary.json
@@ -256,6 +261,9 @@ jobs:
         if: ${{ always() && steps.package_ipa.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lxpp-v1.14.9-b32-r6-${{ steps.simulator_tests.outcome == 'success' && 'XCTEST-PASSED' || 'BUILD-ONLY-UNVERIFIED' }}-unsigned-ipa
-          path: clients/apple/build/SFI-lxpp-v1.14.9-b32-r6-Config-Studio-unsigned.ipa
+          name: SFI-lxpp-v1.14.9-b33-r6-${{ steps.simulator_tests.outcome == 'success' && 'XCTEST-PASSED' || 'BUILD-ONLY-UNVERIFIED' }}-unsigned-ipa
+          path: |
+            clients/apple/build/SFI-lxpp-v1.14.9-b33-r6-Config-Studio-unsigned.ipa
+            clients/apple/scripts/prepare_ipa_for_signer.py
+            clients/apple/RELEASE_NOTES_B33.md
           compression-level: 1
