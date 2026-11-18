@@ -1,0 +1,59 @@
+name: LX multi-IP race experiment
+
+on:
+  push:
+    branches:
+      - feature/lx-ip-race
+    paths:
+      - common/dialer/**
+      - option/outbound.go
+      - .github/workflows/lx-ip-race.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lx-ip-race-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - name: Use pinned LX Go toolchain
+        id: go_pin
+        run: echo "version=$(tr -d '[:space:]' < go.version | sed 's/^go//')" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ steps.go_pin.outputs.version }}
+          cache: true
+      - name: Format ported files
+        run: |
+          gofmt -w common/dialer/tcp_concurrent_lx.go common/dialer/tcp_concurrent_lx_test.go \
+            common/dialer/resolve.go common/dialer/dialer.go option/outbound.go
+      - name: Run TCP race and existing dialer tests with race detector
+        run: |
+          go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' \
+            ./common/dialer/ ./option/
+      - name: Build sing-box-LX CLI
+        run: |
+          make -f Makefile.lx lx-build LX_OUTPUT=sing-box
+          ./sing-box version
+      - name: Commit gofmt only after successful tests
+        run: |
+          if ! git diff --quiet -- common/dialer/tcp_concurrent_lx.go \
+            common/dialer/tcp_concurrent_lx_test.go common/dialer/resolve.go \
+            common/dialer/dialer.go option/outbound.go; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add common/dialer/tcp_concurrent_lx.go common/dialer/tcp_concurrent_lx_test.go \
+              common/dialer/resolve.go common/dialer/dialer.go option/outbound.go
+            git commit -m "style(lx): gofmt tested IP-race experiment"
+            git push origin HEAD:feature/lx-ip-race
+          fi
