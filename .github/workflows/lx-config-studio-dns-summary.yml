@@ -1,5 +1,5 @@
 name: SFI LX++ b35 verified REALITY IP race with all b33 features
-run-name: "LX iOS | b35 full b33 + verified TLS/REALITY IP race | 1.14.9 (build 34) | unsigned IPA"
+run-name: "LX iOS | b35 full b33 + verified TLS/REALITY IP race | 1.14.9 (build 35) | unsigned IPA"
 
 on:
   push:
