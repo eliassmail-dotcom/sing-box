@@ -18,7 +18,10 @@ import (
 	N "github.com/sagernet/sing/common/network"
 )
 
-const lxVerifiedIPAttemptTimeout = 3 * time.Second
+// Per-IP TCP+REALITY budget: with a 2s URLTest and three live slots,
+// a 1s per-address cap lets the sixth A record start before the URLTest
+// deadline even when the preceding five addresses silently blackhole.
+const lxVerifiedIPAttemptTimeout = time.Second
 
 // IPRaceEnabled is false for every non-opt-in resolve dialer, preserving the
 // ordinary sing-box TLS and ECH call path.
@@ -56,7 +59,7 @@ func (d *resolveDialer) DialVerifiedTCP(
 	return d.ipRace.dial(ctx, destination, addresses, addresses[0].Is6(),
 		func(raceCtx context.Context, ip netip.Addr) (net.Conn, error) {
 			// Do not let a TCP-accepting but REALITY-silent endpoint occupy
-			// one of the four slots indefinitely. The outer URLTest/request
+			// one of the three slots indefinitely. The outer URLTest/request
 			// deadline remains authoritative.
 			attemptCtx := raceCtx
 			cancel := func() {}
