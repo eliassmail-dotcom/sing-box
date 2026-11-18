@@ -1,9 +1,8 @@
-name: LX authenticated IP race experiment
+name: LX verified TLS and REALITY IP race
 
 on:
   push:
     branches:
-      - feature/lx-ip-race
       - feature/lx-reality-ip-race
     paths:
       - common/dialer/**
@@ -17,13 +16,13 @@ permissions:
   contents: write
 
 concurrency:
-  group: lx-ip-race-${{ github.ref }}
+  group: lx-real-ip-race-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
         with:
@@ -36,54 +35,36 @@ jobs:
         with:
           go-version: ${{ steps.go_pin.outputs.version }}
           cache: true
-      - name: Format ported files
+      - name: Format changed source
         run: |
           gofmt -w common/dialer/tcp_concurrent_lx.go common/dialer/tcp_concurrent_lx_test.go \
             common/dialer/verified_tcp_lx.go common/tls/verified_race_lx_test.go \
-            common/tls/verified_reality_race_lx_test.go common/tls/client.go common/dialer/resolve.go common/dialer/dialer.go \
-            option/outbound.go protocol/vless/outbound.go
-      - name: Run TCP race and existing dialer tests with race detector
+            common/tls/verified_reality_race_lx_test.go common/tls/client.go \
+            common/dialer/resolve.go common/dialer/dialer.go option/outbound.go protocol/vless/outbound.go
+      - name: Run dialer, TLS and VLESS tests with race detector
         run: |
           go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' \
             ./common/dialer/ ./common/tls/ ./option/ ./protocol/vless/
-      - name: Real REALITY handshake test (TLS decoy must lose)
+      - name: Test real REALITY server beats TLS decoy
         run: |
           go test -race -count=1 -timeout=8m -ldflags '-checklinkname=0' \
             -tags 'with_utls with_lx_command' \
-            -run '^TestLXIPRaceRequiresActualREALITYAuthentication        run: |
+            -run '^TestLXIPRaceRequiresActualREALITYAuthentication$' ./common/tls/
+      - name: Build sing-box-LX native CLI
+        run: |
           make -f Makefile.lx lx-build LX_OUTPUT=sing-box
           ./sing-box version
-      - name: Commit gofmt only after successful tests
+      - name: Commit gofmt after passing validation
         run: |
-          if ! git diff --quiet -- common/dialer/tcp_concurrent_lx.go \
-            common/dialer/tcp_concurrent_lx_test.go common/dialer/resolve.go \
-            common/dialer/verified_tcp_lx.go common/tls/verified_race_lx_test.go \
-            common/tls/verified_reality_race_lx_test.go common/tls/client.go common/dialer/dialer.go option/outbound.go protocol/vless/outbound.go; then
+          if ! git diff --quiet -- common/dialer common/tls/client.go \
+            common/tls/verified_race_lx_test.go common/tls/verified_reality_race_lx_test.go \
+            option/outbound.go protocol/vless/outbound.go; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add common/dialer/tcp_concurrent_lx.go common/dialer/tcp_concurrent_lx_test.go \
               common/dialer/verified_tcp_lx.go common/tls/verified_race_lx_test.go \
               common/tls/verified_reality_race_lx_test.go common/tls/client.go \
               common/dialer/resolve.go common/dialer/dialer.go option/outbound.go protocol/vless/outbound.go
-            git commit -m "style(lx): gofmt tested IP-race experiment"
-            git push origin HEAD:feature/lx-reality-ip-race
-          fi
- ./common/tls/
-      - name: Build sing-box-LX CLI
-        run: |
-          make -f Makefile.lx lx-build LX_OUTPUT=sing-box
-          ./sing-box version
-      - name: Commit gofmt only after successful tests
-        run: |
-          if ! git diff --quiet -- common/dialer/tcp_concurrent_lx.go \
-            common/dialer/tcp_concurrent_lx_test.go common/dialer/resolve.go \
-            common/dialer/verified_tcp_lx.go common/tls/verified_race_lx_test.go \
-            common/tls/verified_reality_race_lx_test.go common/tls/client.go common/dialer/dialer.go option/outbound.go protocol/vless/outbound.go; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add common/dialer/tcp_concurrent_lx.go common/dialer/tcp_concurrent_lx_test.go \
-              common/dialer/verified_tcp_lx.go common/tls/verified_race_lx_test.go common/tls/client.go \
-              common/dialer/resolve.go common/dialer/dialer.go option/outbound.go protocol/vless/outbound.go
-            git commit -m "style(lx): gofmt tested IP-race experiment"
+            git commit -m "style(lx): gofmt verified TLS and REALITY race"
             git push origin HEAD:feature/lx-reality-ip-race
           fi
