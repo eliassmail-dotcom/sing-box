@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	lxIPRaceMaxConcurrent = 4
+	lxIPRaceMaxConcurrent = 3
 	lxIPRaceStagger       = 75 * time.Millisecond
 	lxIPRaceWinnerTTL     = 10 * time.Minute
 	lxIPRaceFailureTTL    = 1 * time.Minute
@@ -152,9 +152,10 @@ func (r *lxIPRace) recordFailure(ip netip.Addr, port uint16) {
 	r.failed[netip.AddrPortFrom(ip, port)] = time.Now().Add(lxIPRaceFailureTTL)
 }
 
-// dial returns the first successful TCP socket. Failed candidates are
-// replaced immediately; otherwise attempts are staggered at 75 ms, with up
-// to four live sockets. A completed race cancels and closes every loser.
+// dial returns the first verified socket when given a TLS/REALITY verifier,
+// otherwise the first TCP socket. Failed candidates are replaced immediately;
+// attempts are staggered at 75 ms with at most three live sockets per node
+// to limit iOS Network Extension file descriptors and memory use.
 // Context cancellation and connect_timeout are delegated to the original
 // outbound dialer, preserving interface binding and other socket policies.
 func (r *lxIPRace) dial(

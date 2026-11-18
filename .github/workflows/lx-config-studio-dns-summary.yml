@@ -1,10 +1,10 @@
-name: SFI LX++ b34 TCP concurrent with all b33 features
-run-name: "LX iOS | b34 full b33 + TCP concurrent | 1.14.9 (build 34) | unsigned IPA"
+name: SFI LX++ b35 verified REALITY IP race with all b33 features
+run-name: "LX iOS | b35 full b33 + verified TLS/REALITY IP race | 1.14.9 (build 34) | unsigned IPA"
 
 on:
   push:
     branches:
-      - feature/lx-ip-race-b34-restored
+      - feature/lx-reality-ip-race-b35-restored
   workflow_dispatch:
 
 permissions:
@@ -38,14 +38,14 @@ jobs:
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
-      - name: Bump complete iOS application and all extensions to build 34
+      - name: Bump complete iOS application and all extensions to build 35
         run: |-
           python3 - <<'PY'
           from pathlib import Path
           p = Path("clients/apple/sing-box.xcodeproj/project.pbxproj")
           t = p.read_text()
           assert t.count("CURRENT_PROJECT_VERSION = 33;") >= 2, "Unexpected b33 version baseline"
-          p.write_text(t.replace("CURRENT_PROJECT_VERSION = 33;", "CURRENT_PROJECT_VERSION = 34;"))
+          p.write_text(t.replace("CURRENT_PROJECT_VERSION = 33;", "CURRENT_PROJECT_VERSION = 35;"))
           assert "CURRENT_PROJECT_VERSION = 33;" not in p.read_text()
           PY
 
@@ -103,11 +103,16 @@ jobs:
       - name: Patch Go for iOS
         run: .github/patch_go_for_ios.sh
 
-      - name: Test experimental TCP concurrent, option decoding, and VLESS reset
+      - name: Test TLS/REALITY-verified IP race, option decoding, and VLESS reset
         run: |-
           grep -q 'TCPConcurrent' option/outbound.go
           grep -q 'ResetTCPConcurrentHistory' protocol/vless/outbound.go
-          go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' ./common/dialer/ ./option/ ./protocol/vless/
+          test -f common/dialer/verified_tcp_lx.go
+          grep -q 'DialVerifiedTCP' common/tls/client.go
+          go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' ./common/dialer/ ./common/tls/ ./option/ ./protocol/vless/
+          go test -race -count=1 -timeout=8m -ldflags '-checklinkname=0' \
+            -tags 'with_utls with_lx_command' \
+            -run '^TestLXIPRaceRequiresActualREALITYAuthentication
 
       - name: Test LX adaptive health and Smart base-white priority
         run: |-
@@ -177,14 +182,14 @@ jobs:
         id: package_ipa
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lxpp-v1.14.9-b34-r6-TCPConcurrent-unsigned.ipa
+          rm -rf Payload SFI-lxpp-v1.14.9-b35-r6-VerifiedREALITY-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
           APP_INFO="Payload/sing-box.app/Info.plist"
           APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO")
           test "$APP_VERSION" = "1.14.9"
-          test "$APP_BUILD" = "34"
+          test "$APP_BUILD" = "35"
           echo "Packaging sing-box lx++ $APP_VERSION ($APP_BUILD)"
           # Cross-target build consistency is mandatory for sideloaded IPA.
           COUNT=0
@@ -207,23 +212,23 @@ jobs:
           {
             "product": "SFI LX++",
             "appVersion": "1.14.9",
-            "build": 34,
+            "build": 35,
             "appleCommit": "$(git -C .. rev-parse HEAD)",
             "coreCommit": "${GITHUB_SHA}",
             "embeddedGeneratorVersion": "v1.4.48r6",
-            "tcpConcurrent": "opt-in (per outbound)",
+            "tcpConcurrent": "opt-in verified TLS/REALITY per outbound",
             "coreBaseline": "ci/ios-config-studio-r6-b33-native-files-start-recovery-20261118",
-            "validation": ["full protocol/group go -race", "TCP multi-IP race go -race", "SFUnitTests compiled", "iOS archive", "target build consistency", "simulator runtime test acceptance gate"]
+            "validation": ["full protocol/group go -race", "authenticated TLS/REALITY IP race go -race", "SFUnitTests compiled", "iOS archive", "target build consistency", "simulator runtime test acceptance gate"]
           }
           EOF
-          zip -qry SFI-lxpp-v1.14.9-b34-r6-TCPConcurrent-unsigned.ipa Payload
-          test -s SFI-lxpp-v1.14.9-b34-r6-TCPConcurrent-unsigned.ipa
-          unzip -tq SFI-lxpp-v1.14.9-b34-r6-TCPConcurrent-unsigned.ipa
+          zip -qry SFI-lxpp-v1.14.9-b35-r6-VerifiedREALITY-unsigned.ipa Payload
+          test -s SFI-lxpp-v1.14.9-b35-r6-VerifiedREALITY-unsigned.ipa
+          unzip -tq SFI-lxpp-v1.14.9-b35-r6-VerifiedREALITY-unsigned.ipa
           # Fail before publishing an IPA whose extension IDs, App Groups or
           # static File Provider Document Group are inconsistent. This does not
           # validate the signed identities that GBox chooses later.
-          python3 ../scripts/verify_unsigned_ipa.py SFI-lxpp-v1.14.9-b34-r6-TCPConcurrent-unsigned.ipa --build 34 | tee signing-preflight.json
-          ls -lh SFI-lxpp-v1.14.9-b34-r6-TCPConcurrent-unsigned.ipa
+          python3 ../scripts/verify_unsigned_ipa.py SFI-lxpp-v1.14.9-b35-r6-VerifiedREALITY-unsigned.ipa --build 35 | tee signing-preflight.json
+          ls -lh SFI-lxpp-v1.14.9-b35-r6-VerifiedREALITY-unsigned.ipa
 
       # The IPA can be built even if Apple's hosted simulator is unavailable,
       # but such an artifact must never appear as a VERIFIED release.
@@ -268,7 +273,7 @@ jobs:
         if: ${{ always() && steps.simulator_tests.outcome != 'skipped' }}
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lx-b34-xctest-evidence
+          name: SFI-lx-b35-xctest-evidence
           path: |
             clients/apple/build/LXTests.xcresult
             clients/apple/build/XCTestSummary.json
@@ -280,9 +285,188 @@ jobs:
         if: ${{ always() && steps.package_ipa.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lxpp-v1.14.9-b34-r6-${{ steps.simulator_tests.outcome == 'success' && 'XCTEST-PASSED' || 'BUILD-ONLY-UNVERIFIED' }}-unsigned-ipa
+          name: SFI-lxpp-v1.14.9-b35-r6-${{ steps.simulator_tests.outcome == 'success' && 'XCTEST-PASSED' || 'BUILD-ONLY-UNVERIFIED' }}-unsigned-ipa
           path: |
-            clients/apple/build/SFI-lxpp-v1.14.9-b34-r6-TCPConcurrent-unsigned.ipa
+            clients/apple/build/SFI-lxpp-v1.14.9-b35-r6-VerifiedREALITY-unsigned.ipa
+            clients/apple/scripts/prepare_ipa_for_signer.py
+            clients/apple/RELEASE_NOTES_B33.md
+          compression-level: 1
+ ./common/tls/
+
+      - name: Test LX adaptive health and Smart base-white priority
+        run: |-
+          go test -race ./protocol/group -count=1 -timeout=8m
+          go test -race ./protocol/group -run '^TestPriorityFallback_SelectedOutboundReadWriteRace$' -count=1 -timeout=8m
+          # Regression for long iOS PluginKitPlugin paths (Darwin sun_path=104B).
+          go test -race ./experimental/libbox -run '^TestCommandSocketPath_' -count=1 -timeout=8m
+          grep -q 'commandSocketPath()' experimental/libbox/command_server.go
+          grep -q 'commandSocketPath()' experimental/libbox/command_client.go
+
+      - name: Build Libbox.xcframework (ios/arm64 + simulator, with_clash_api via integration patch)
+        run: |-
+          make lib_install
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          git tag v1.14.4-lx.33 -f
+          go run ./cmd/internal/build_libbox -target apple -platform ios/arm64,iossimulator/arm64
+          rm -rf clients/apple/Libbox.xcframework
+          cp -R Libbox.xcframework clients/apple/Libbox.xcframework
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Dump CommandClientHandler protocol (diagnostic)
+        run: |-
+          grep -n -B2 -A20 'Protocol LibboxCommandClientHandlerProtocol' clients/apple/Libbox.xcframework/ios-arm64/Libbox.framework/Headers/Libbox.h || \
+            grep -n -A20 'LibboxCommandClientHandlerProtocol' clients/apple/Libbox.xcframework/ios-arm64/Libbox.framework/Headers/Libbox.h | head -60
+
+      - name: Resolve Swift packages into isolated build directory
+        run: |
+          cd clients/apple
+          mkdir -p build/SourcePackages
+          for attempt in 1 2 3; do
+            if xcodebuild -resolvePackageDependencies -scheme SFI -clonedSourcePackagesDirPath "$PWD/build/SourcePackages"; then
+              exit 0
+            fi
+            echo "SwiftPM resolve attempt $attempt failed; retrying isolated checkout"
+            sleep 5
+          done
+          exit 1
+
+      # Libbox simulator is arm64-only; do not link its framework into x86_64.
+      # b27 compiled Swift tests, then the hosted iOS Simulator service died
+      # before any test case started. Compilation is required to publish IPA.
+      - name: Compile SFUnitTests without booting a simulator (required)
+        run: |-
+          cd clients/apple
+          xcodebuild build-for-testing -skipPackagePluginValidation \
+            -parallel-testing-enabled NO \
+            -clonedSourcePackagesDirPath "$PWD/build/SourcePackages" \
+            -scheme SFI -configuration Debug \
+            -only-testing:SFUnitTests \
+            -destination 'generic/platform=iOS Simulator' \
+            ARCHS=arm64 CODE_SIGN_IDENTITY=-
+
+      - name: Archive SFI (unsigned)
+        run: |-
+          cd clients/apple
+          rm -rf build/SFI.xcarchive
+          xcodebuild archive -skipPackagePluginValidation \
+            -clonedSourcePackagesDirPath "$PWD/build/SourcePackages" \
+            -scheme SFI -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/SFI.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+      - name: Package unsigned IPA (for GBox signing)
+        id: package_ipa
+        run: |-
+          cd clients/apple/build
+          rm -rf Payload SFI-lxpp-v1.14.9-b35-r6-VerifiedREALITY-unsigned.ipa
+          mkdir Payload
+          cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
+          APP_INFO="Payload/sing-box.app/Info.plist"
+          APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO")
+          APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO")
+          test "$APP_VERSION" = "1.14.9"
+          test "$APP_BUILD" = "35"
+          echo "Packaging sing-box lx++ $APP_VERSION ($APP_BUILD)"
+          # Cross-target build consistency is mandatory for sideloaded IPA.
+          COUNT=0
+          # Only direct .appex bundle Info.plists. Recursive find also visits
+          # resource/framework plists, which need not have CFBundleVersion.
+          for extension in Payload/sing-box.app/{PlugIns,Extensions}/*.appex; do
+            test -d "$extension" || continue
+            plist="$extension/Info.plist"
+            test -f "$plist" || { echo "Missing extension Info.plist: $extension"; exit 1; }
+            EXT_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")
+            EXT_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")
+            echo "Embedded extension: $extension | version=$EXT_VERSION build=$EXT_BUILD"
+            test "$EXT_BUILD" = "$APP_BUILD" || { echo "Extension build mismatch: $plist"; exit 1; }
+            test "$EXT_VERSION" = "$APP_VERSION" || { echo "Extension marketing version mismatch: $plist"; exit 1; }
+            COUNT=$((COUNT + 1))
+          done
+          test "$COUNT" -ge 5 || { echo "Expected >=5 embedded .appex bundles, found $COUNT"; exit 1; }
+          # Provenance manifest is included in the unsigned .app before signing.
+          cat > Payload/sing-box.app/LXBuildManifest.json <<EOF
+          {
+            "product": "SFI LX++",
+            "appVersion": "1.14.9",
+            "build": 35,
+            "appleCommit": "$(git -C .. rev-parse HEAD)",
+            "coreCommit": "${GITHUB_SHA}",
+            "embeddedGeneratorVersion": "v1.4.48r6",
+            "tcpConcurrent": "opt-in verified TLS/REALITY per outbound",
+            "coreBaseline": "ci/ios-config-studio-r6-b33-native-files-start-recovery-20261118",
+            "validation": ["full protocol/group go -race", "authenticated TLS/REALITY IP race go -race", "SFUnitTests compiled", "iOS archive", "target build consistency", "simulator runtime test acceptance gate"]
+          }
+          EOF
+          zip -qry SFI-lxpp-v1.14.9-b35-r6-VerifiedREALITY-unsigned.ipa Payload
+          test -s SFI-lxpp-v1.14.9-b35-r6-VerifiedREALITY-unsigned.ipa
+          unzip -tq SFI-lxpp-v1.14.9-b35-r6-VerifiedREALITY-unsigned.ipa
+          # Fail before publishing an IPA whose extension IDs, App Groups or
+          # static File Provider Document Group are inconsistent. This does not
+          # validate the signed identities that GBox chooses later.
+          python3 ../scripts/verify_unsigned_ipa.py SFI-lxpp-v1.14.9-b35-r6-VerifiedREALITY-unsigned.ipa --build 35 | tee signing-preflight.json
+          ls -lh SFI-lxpp-v1.14.9-b35-r6-VerifiedREALITY-unsigned.ipa
+
+      # The IPA can be built even if Apple's hosted simulator is unavailable,
+      # but such an artifact must never appear as a VERIFIED release.
+      - name: Run SFUnitTests on hosted simulator (acceptance gate)
+        id: simulator_tests
+        timeout-minutes: 15
+        run: |-
+          SIM=$(xcrun simctl list devices available -j | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)
+          for dev in d['devices'].values():
+              for x in dev:
+                  if x['isAvailable'] and x['name'].startswith('iPhone'):
+                      print(x['name']); raise SystemExit
+          sys.exit(1)
+          ")
+          echo "Using simulator: $SIM"
+          cd clients/apple
+          rm -rf build/LXTests.xcresult
+          xcodebuild test -skipPackagePluginValidation \
+            -resultBundlePath "$PWD/build/LXTests.xcresult" \
+            -parallel-testing-enabled NO \
+            -clonedSourcePackagesDirPath "$PWD/build/SourcePackages" \
+            -scheme SFI -configuration Debug \
+            -only-testing:SFUnitTests \
+            -destination "platform=iOS Simulator,name=$SIM" \
+            ARCHS=arm64 CODE_SIGN_IDENTITY=-
+          # Exit 0 alone is insufficient: reject zero tests or missing results.
+          xcrun xcresulttool get test-results summary --path build/LXTests.xcresult --format json > build/XCTestSummary.json
+          python3 - <<'PY'
+          import json
+          with open('build/XCTestSummary.json',encoding='utf-8') as f: j=json.load(f)
+          total=j.get('totalTestCount',0)
+          fails=j.get('failedTests',0)
+          status=j.get('result','')
+          print(f"XCTest summary: {total} tests; {fails} failures; result={status}")
+          if total < 1 or fails != 0 or status not in ('Passed','Success'):
+              raise SystemExit("XCTest not completed and passed")
+          PY
+
+      - name: Upload XCTest evidence
+        if: ${{ always() && steps.simulator_tests.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: SFI-lx-b35-xctest-evidence
+          path: |
+            clients/apple/build/LXTests.xcresult
+            clients/apple/build/XCTestSummary.json
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 1
+
+      - name: Upload IPA artifact (explicit validation status)
+        if: ${{ always() && steps.package_ipa.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: SFI-lxpp-v1.14.9-b35-r6-${{ steps.simulator_tests.outcome == 'success' && 'XCTEST-PASSED' || 'BUILD-ONLY-UNVERIFIED' }}-unsigned-ipa
+          path: |
+            clients/apple/build/SFI-lxpp-v1.14.9-b35-r6-VerifiedREALITY-unsigned.ipa
             clients/apple/scripts/prepare_ipa_for_signer.py
             clients/apple/RELEASE_NOTES_B33.md
           compression-level: 1
