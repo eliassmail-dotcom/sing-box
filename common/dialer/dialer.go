@@ -44,6 +44,13 @@ func NewWithOptions(options Options) (N.Dialer, error) {
 		err    error
 	)
 	hasDetour := dialOptions.Detour != "" || options.DefaultOutbound
+
+    if dialOptions.TCPConcurrent && hasDetour {
+        return nil, E.New("tcp_concurrent: only direct socket dialers are supported; do not enable on a detour")
+    }
+    if dialOptions.TCPConcurrent && dialOptions.TCPFastOpen {
+        return nil, E.New("tcp_concurrent: incompatible with tcp_fast_open")
+    }
 	if dialOptions.Detour != "" {
 		outboundManager := service.FromContext[adapter.OutboundManager](options.Context)
 		if outboundManager == nil {
@@ -97,6 +104,14 @@ func NewWithOptions(options Options) (N.Dialer, error) {
 			dnsQueryOptions,
 			time.Duration(dialOptions.FallbackDelay),
 		)
+        if dialOptions.TCPConcurrent {
+            switch resolved := dialer.(type) {
+            case *resolveDialer:
+                resolved.ipRace = newLXIPRace()
+            case *resolveParallelNetworkDialer:
+                resolved.ipRace = newLXIPRace()
+            }
+        }
 	}
 	return dialer, nil
 }
