@@ -134,3 +134,16 @@ func TestLXIPRaceOptionDecodesAsBool(t *testing.T) {
 		t.Fatal("legacy configs must remain sequential/dual-stack by default")
 	}
 }
+
+func TestLXIPRaceResetOnNetworkChange(t *testing.T) {
+    r := newLXIPRace()
+    target := netip.MustParseAddr("192.0.2.6")
+    r.recordWinner(target, 22*time.Millisecond)
+    r.recordFailure(netip.MustParseAddr("192.0.2.4"), 443)
+    r.resetHistory()
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    if r.winner.IsValid() || r.winnerRTT != 0 || !r.winnerExpiry.IsZero() || len(r.failed) != 0 {
+        t.Fatalf("outbound IP preference survived interface update: winner=%v failures=%v", r.winner, r.failed)
+    }
+}
