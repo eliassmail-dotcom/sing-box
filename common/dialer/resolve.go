@@ -3,6 +3,7 @@ package dialer
 import (
 	"context"
 	"net"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -41,6 +42,7 @@ type resolveDialer struct {
 	initErr       error
 	queryOptions  adapter.DNSQueryOptions
 	fallbackDelay time.Duration
+	ipRace        *lxIPRace
 }
 
 func NewResolveDialer(ctx context.Context, dialer N.Dialer, parallel bool, server string, queryOptions adapter.DNSQueryOptions, fallbackDelay time.Duration) ResolveDialer {
@@ -104,11 +106,19 @@ func (d *resolveDialer) DialContext(ctx context.Context, network string, destina
 	if err != nil {
 		return nil, err
 	}
+	if len(addresses) == 0 {
+		return nil, E.New("DNS returned no IP addresses for ", destination.Fqdn)
+	}
+	if d.ipRace != nil && N.NetworkName(network) == N.NetworkTCP && len(addresses) > 1 {
+		return d.ipRace.dial(ctx, destination, addresses, addresses[0].Is6(),
+			func(raceCtx context.Context, address netip.Addr) (net.Conn, error) {
+				return d.dialer.DialContext(raceCtx, network, M.SocksaddrFrom(address, destination.Port))
+			})
+	}
 	if d.parallel {
 		return N.DialParallel(ctx, d.dialer, network, destination, addresses, addresses[0].Is6(), d.fallbackDelay)
-	} else {
-		return N.DialSerial(ctx, d.dialer, network, destination, addresses)
 	}
+	return N.DialSerial(ctx, d.dialer, network, destination, addresses)
 }
 
 func (d *resolveDialer) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
@@ -135,6 +145,15 @@ func (d *resolveDialer) QueryOptions() adapter.DNSQueryOptions {
 	return d.queryOptions
 }
 
+// ResetTCPConcurrentHistory clears transient IP preferences after a Wi-Fi,
+// cellular or routing-interface change. The embedded parallel resolve dialer
+// inherits this method.
+func (d *resolveDialer) ResetTCPConcurrentHistory() {
+	if d.ipRace != nil {
+		d.ipRace.resetHistory()
+	}
+}
+
 func (d *resolveDialer) Upstream() any {
 	return d.dialer
 }
@@ -152,14 +171,23 @@ func (d *resolveParallelNetworkDialer) DialParallelInterface(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
+	if len(addresses) == 0 {
+		return nil, E.New("DNS returned no IP addresses for ", destination.Fqdn)
+	}
 	if fallbackDelay == 0 {
 		fallbackDelay = d.fallbackDelay
 	}
+	if d.ipRace != nil && N.NetworkName(network) == N.NetworkTCP && len(addresses) > 1 {
+		return d.ipRace.dial(ctx, destination, addresses, addresses[0].Is6(),
+			func(raceCtx context.Context, address netip.Addr) (net.Conn, error) {
+				return DialSerialNetwork(raceCtx, d.dialer, network, destination,
+					[]netip.Addr{address}, strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
+			})
+	}
 	if d.parallel {
 		return DialParallelNetwork(ctx, d.dialer, network, destination, addresses, addresses[0].Is6(), strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
-	} else {
-		return DialSerialNetwork(ctx, d.dialer, network, destination, addresses, strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
 	}
+	return DialSerialNetwork(ctx, d.dialer, network, destination, addresses, strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
 }
 
 func (d *resolveParallelNetworkDialer) ListenSerialInterfacePacket(ctx context.Context, destination M.Socksaddr, strategy *C.NetworkStrategy, interfaceType []C.InterfaceType, fallbackInterfaceType []C.InterfaceType, fallbackDelay time.Duration) (net.PacketConn, error) {

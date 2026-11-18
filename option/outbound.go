@@ -83,16 +83,18 @@ type DialerOptions struct {
 }
 
 type AbstractDialerOptions struct {
-	BindInterface              string                            `json:"bind_interface,omitempty"`
-	Inet4BindAddress           *badoption.Addr                   `json:"inet4_bind_address,omitempty"`
-	Inet6BindAddress           *badoption.Addr                   `json:"inet6_bind_address,omitempty"`
-	BindAddressNoPort          bool                              `json:"bind_address_no_port,omitempty"`
-	ProtectPath                string                            `json:"protect_path,omitempty"`
-	RoutingMark                FwMark                            `json:"routing_mark,omitempty"`
-	ReuseAddr                  bool                              `json:"reuse_addr,omitempty"`
-	NetNs                      string                            `json:"netns,omitempty" reference:"network_namespace"`
-	ConnectTimeout             badoption.Duration                `json:"connect_timeout,omitempty"`
-	TCPFastOpen                bool                              `json:"tcp_fast_open,omitempty"`
+	BindInterface     string             `json:"bind_interface,omitempty"`
+	Inet4BindAddress  *badoption.Addr    `json:"inet4_bind_address,omitempty"`
+	Inet6BindAddress  *badoption.Addr    `json:"inet6_bind_address,omitempty"`
+	BindAddressNoPort bool               `json:"bind_address_no_port,omitempty"`
+	ProtectPath       string             `json:"protect_path,omitempty"`
+	RoutingMark       FwMark             `json:"routing_mark,omitempty"`
+	ReuseAddr         bool               `json:"reuse_addr,omitempty"`
+	NetNs             string             `json:"netns,omitempty" reference:"network_namespace"`
+	ConnectTimeout    badoption.Duration `json:"connect_timeout,omitempty"`
+	TCPFastOpen       bool               `json:"tcp_fast_open,omitempty"`
+	// LX: opt-in concurrent IPv4/IPv6 socket racing for a domain server.
+	TCPConcurrent              bool                              `json:"tcp_concurrent,omitempty"`
 	TCPMultiPath               bool                              `json:"tcp_multi_path,omitempty"`
 	DisableTCPKeepAlive        bool                              `json:"disable_tcp_keep_alive,omitempty"`
 	TCPKeepAlive               badoption.Duration                `json:"tcp_keep_alive,omitempty"`

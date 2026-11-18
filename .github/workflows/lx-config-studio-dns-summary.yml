@@ -1,10 +1,10 @@
-name: SFI LX++ b33 native Files fallback and VPN start recovery
-run-name: "LX iOS | b33 native Files fallback & first-start recovery | 1.14.9 (build 33) | unsigned IPA"
+name: SFI LX++ b34 TCP concurrent with all b33 features
+run-name: "LX iOS | b34 full b33 + TCP concurrent | 1.14.9 (build 34) | unsigned IPA"
 
 on:
   push:
     branches:
-      - ci/ios-config-studio-r6-b33-native-files-start-recovery-20261118
+      - feature/lx-ip-race-b34-restored
   workflow_dispatch:
 
 permissions:
@@ -37,6 +37,17 @@ jobs:
           test "$(git -C clients/apple rev-parse HEAD)" = "603a27186f1be199cafb31c8c8735d5f0070bb86"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
+
+      - name: Bump complete iOS application and all extensions to build 34
+        run: |-
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("clients/apple/sing-box.xcodeproj/project.pbxproj")
+          t = p.read_text()
+          assert t.count("CURRENT_PROJECT_VERSION = 33;") >= 2, "Unexpected b33 version baseline"
+          p.write_text(t.replace("CURRENT_PROJECT_VERSION = 33;", "CURRENT_PROJECT_VERSION = 34;"))
+          assert "CURRENT_PROJECT_VERSION = 33;" not in p.read_text()
+          PY
 
       - name: Verify signing integration sources before compilation
         run: |-
@@ -91,6 +102,12 @@ jobs:
 
       - name: Patch Go for iOS
         run: .github/patch_go_for_ios.sh
+
+      - name: Test experimental TCP concurrent, option decoding, and VLESS reset
+        run: |-
+          grep -q 'TCPConcurrent' option/outbound.go
+          grep -q 'ResetTCPConcurrentHistory' protocol/vless/outbound.go
+          go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' ./common/dialer/ ./option/ ./protocol/vless/
 
       - name: Test LX adaptive health and Smart base-white priority
         run: |-
@@ -160,14 +177,14 @@ jobs:
         id: package_ipa
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lxpp-v1.14.9-b33-r6-Config-Studio-unsigned.ipa
+          rm -rf Payload SFI-lxpp-v1.14.9-b34-r6-TCPConcurrent-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
           APP_INFO="Payload/sing-box.app/Info.plist"
           APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO")
           test "$APP_VERSION" = "1.14.9"
-          test "$APP_BUILD" = "33"
+          test "$APP_BUILD" = "34"
           echo "Packaging sing-box lx++ $APP_VERSION ($APP_BUILD)"
           # Cross-target build consistency is mandatory for sideloaded IPA.
           COUNT=0
@@ -190,21 +207,23 @@ jobs:
           {
             "product": "SFI LX++",
             "appVersion": "1.14.9",
-            "build": 33,
+            "build": 34,
             "appleCommit": "$(git -C .. rev-parse HEAD)",
             "coreCommit": "${GITHUB_SHA}",
             "embeddedGeneratorVersion": "v1.4.48r6",
-            "validation": ["full protocol/group go -race", "SFUnitTests compiled", "iOS archive", "target build consistency", "simulator runtime test acceptance gate"]
+            "tcpConcurrent": "opt-in (per outbound)",
+            "coreBaseline": "ci/ios-config-studio-r6-b33-native-files-start-recovery-20261118",
+            "validation": ["full protocol/group go -race", "TCP multi-IP race go -race", "SFUnitTests compiled", "iOS archive", "target build consistency", "simulator runtime test acceptance gate"]
           }
           EOF
-          zip -qry SFI-lxpp-v1.14.9-b33-r6-Config-Studio-unsigned.ipa Payload
-          test -s SFI-lxpp-v1.14.9-b33-r6-Config-Studio-unsigned.ipa
-          unzip -tq SFI-lxpp-v1.14.9-b33-r6-Config-Studio-unsigned.ipa
+          zip -qry SFI-lxpp-v1.14.9-b34-r6-TCPConcurrent-unsigned.ipa Payload
+          test -s SFI-lxpp-v1.14.9-b34-r6-TCPConcurrent-unsigned.ipa
+          unzip -tq SFI-lxpp-v1.14.9-b34-r6-TCPConcurrent-unsigned.ipa
           # Fail before publishing an IPA whose extension IDs, App Groups or
           # static File Provider Document Group are inconsistent. This does not
           # validate the signed identities that GBox chooses later.
-          python3 ../scripts/verify_unsigned_ipa.py SFI-lxpp-v1.14.9-b33-r6-Config-Studio-unsigned.ipa --build 33 | tee signing-preflight.json
-          ls -lh SFI-lxpp-v1.14.9-b33-r6-Config-Studio-unsigned.ipa
+          python3 ../scripts/verify_unsigned_ipa.py SFI-lxpp-v1.14.9-b34-r6-TCPConcurrent-unsigned.ipa --build 34 | tee signing-preflight.json
+          ls -lh SFI-lxpp-v1.14.9-b34-r6-TCPConcurrent-unsigned.ipa
 
       # The IPA can be built even if Apple's hosted simulator is unavailable,
       # but such an artifact must never appear as a VERIFIED release.
@@ -249,7 +268,7 @@ jobs:
         if: ${{ always() && steps.simulator_tests.outcome != 'skipped' }}
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lx-b33-xctest-evidence
+          name: SFI-lx-b34-xctest-evidence
           path: |
             clients/apple/build/LXTests.xcresult
             clients/apple/build/XCTestSummary.json
@@ -261,9 +280,9 @@ jobs:
         if: ${{ always() && steps.package_ipa.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lxpp-v1.14.9-b33-r6-${{ steps.simulator_tests.outcome == 'success' && 'XCTEST-PASSED' || 'BUILD-ONLY-UNVERIFIED' }}-unsigned-ipa
+          name: SFI-lxpp-v1.14.9-b34-r6-${{ steps.simulator_tests.outcome == 'success' && 'XCTEST-PASSED' || 'BUILD-ONLY-UNVERIFIED' }}-unsigned-ipa
           path: |
-            clients/apple/build/SFI-lxpp-v1.14.9-b33-r6-Config-Studio-unsigned.ipa
+            clients/apple/build/SFI-lxpp-v1.14.9-b34-r6-TCPConcurrent-unsigned.ipa
             clients/apple/scripts/prepare_ipa_for_signer.py
             clients/apple/RELEASE_NOTES_B33.md
           compression-level: 1
