@@ -43,15 +43,15 @@ func newLXIPRace() *lxIPRace {
 	return &lxIPRace{failed: make(map[netip.AddrPort]time.Time)}
 }
 
- // resetHistory is called when the network interface changes. A previously
- // working Wi-Fi address must not be preferred on cellular (or conversely).
+// resetHistory is called when the network interface changes. A previously
+// working Wi-Fi address must not be preferred on cellular (or conversely).
 func (r *lxIPRace) resetHistory() {
-    r.mu.Lock()
-    defer r.mu.Unlock()
-    r.winner = netip.Addr{}
-    r.winnerRTT = 0
-    r.winnerExpiry = time.Time{}
-    clear(r.failed)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.winner = netip.Addr{}
+	r.winnerRTT = 0
+	r.winnerExpiry = time.Time{}
+	clear(r.failed)
 }
 
 type lxIPRaceResult struct {

@@ -168,11 +168,11 @@ func (h *Outbound) MultiplexEnabled() bool {
 }
 
 func (h *Outbound) InterfaceUpdated(ctx context.Context) {
-    // The cached winning address is valid only for the previous network.
-    // Keep the opt-in race isolated from ordinary VLESS connections.
-    if resetter, ok := h.dialer.(interface{ ResetTCPConcurrentHistory() }); ok {
-        resetter.ResetTCPConcurrentHistory()
-    }
+	// The cached winning address is valid only for the previous network.
+	// Keep the opt-in race isolated from ordinary VLESS connections.
+	if resetter, ok := h.dialer.(interface{ ResetTCPConcurrentHistory() }); ok {
+		resetter.ResetTCPConcurrentHistory()
+	}
 	if h.transport != nil {
 		h.transport.Close()
 	}

@@ -149,9 +149,9 @@ func (d *resolveDialer) QueryOptions() adapter.DNSQueryOptions {
 // cellular or routing-interface change. The embedded parallel resolve dialer
 // inherits this method.
 func (d *resolveDialer) ResetTCPConcurrentHistory() {
-    if d.ipRace != nil {
-        d.ipRace.resetHistory()
-    }
+	if d.ipRace != nil {
+		d.ipRace.resetHistory()
+	}
 }
 
 func (d *resolveDialer) Upstream() any {
