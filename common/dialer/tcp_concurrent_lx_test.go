@@ -149,40 +149,44 @@ func TestLXIPRaceResetOnNetworkChange(t *testing.T) {
 }
 
 func TestLXIPRaceDoesNotRememberTCPOnlySuccess(t *testing.T) {
-    // The first address accepts TCP, but an actual handshake verifier would
-    // reject its decoy response. Only the second authenticated address wins.
-    r := newLXIPRace()
-    addresses := []netip.Addr{
-        netip.MustParseAddr("192.0.2.11"),
-        netip.MustParseAddr("192.0.2.12"),
-    }
-    destination := M.Socksaddr{Fqdn:"uk.example.test", Port:443}
-    ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-    defer cancel()
-    var sockets []net.Conn
-    var mu sync.Mutex
-    dialAndVerify := func(ctx context.Context, ip netip.Addr) (net.Conn,error) {
-        client, server := net.Pipe()
-        mu.Lock()
-        sockets = append(sockets, server)
-        mu.Unlock()
-        if ip == addresses[0] {
-            _ = client.Close()
-            return nil, errors.New("REALITY decoy failed certificate verification")
-        }
-        return client, nil
-    }
-    conn,err := r.dial(ctx,destination,addresses,false,dialAndVerify)
-    if err != nil {t.Fatal(err)}
-    _ = conn.Close()
-    mu.Lock()
-    defer mu.Unlock()
-    for _, socket := range sockets { _=socket.Close() }
-    r.mu.Lock()
-    winner:=r.winner
-    failures:=len(r.failed)
-    r.mu.Unlock()
-    if winner != addresses[1] || failures == 0 {
-        t.Fatalf("expected second verified IP, winner=%v failures=%d", winner, failures)
-    }
+	// The first address accepts TCP, but an actual handshake verifier would
+	// reject its decoy response. Only the second authenticated address wins.
+	r := newLXIPRace()
+	addresses := []netip.Addr{
+		netip.MustParseAddr("192.0.2.11"),
+		netip.MustParseAddr("192.0.2.12"),
+	}
+	destination := M.Socksaddr{Fqdn: "uk.example.test", Port: 443}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	var sockets []net.Conn
+	var mu sync.Mutex
+	dialAndVerify := func(ctx context.Context, ip netip.Addr) (net.Conn, error) {
+		client, server := net.Pipe()
+		mu.Lock()
+		sockets = append(sockets, server)
+		mu.Unlock()
+		if ip == addresses[0] {
+			_ = client.Close()
+			return nil, errors.New("REALITY decoy failed certificate verification")
+		}
+		return client, nil
+	}
+	conn, err := r.dial(ctx, destination, addresses, false, dialAndVerify)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+	mu.Lock()
+	defer mu.Unlock()
+	for _, socket := range sockets {
+		_ = socket.Close()
+	}
+	r.mu.Lock()
+	winner := r.winner
+	failures := len(r.failed)
+	r.mu.Unlock()
+	if winner != addresses[1] || failures == 0 {
+		t.Fatalf("expected second verified IP, winner=%v failures=%d", winner, failures)
+	}
 }
