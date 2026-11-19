@@ -198,6 +198,37 @@ func TestLxRealityDetourDefaultFragmentsFirstFlight(t *testing.T) {
 	require.GreaterOrEqual(t, lxTLSRecordCount(t, flight), 2, "detour default must split the REALITY ClientHello on the wire")
 }
 
+// SPEC b36: a direct VLESS REALITY client with both experimental options
+// must retain the hybrid key share and split the ClientHello on the wire.
+// This uses NewClientWithOptions with DialedThroughDetour=false, not the chain default.
+func TestLxRealityDirectHybridRecordFragmentCombinedFirstFlight(t *testing.T) {
+  t.Parallel()
+  options := lxRealityOptions("chrome", C.RealityKeyShareHybrid, false, true)
+  config, err := NewClientWithOptions(ClientOptions{
+    Context: context.Background(),
+    Logger: logger.NOP(),
+    ServerAddress: "www.example.com",
+    Options: options,
+    DialedThroughDetour: false,
+  })
+  require.NoError(t, err)
+  client, ok := config.(*RealityClientConfig)
+  require.True(t, ok, "expected REALITY config")
+  require.Equal(t, C.RealityKeyShareHybrid, client.keyShare)
+  require.True(t, client.uClient.recordFragment, "direct REALITY must retain explicit record fragmentation")
+  helloConn := lxRealityPrepare(t, client)
+  hello := helloConn.HandshakeState.Hello
+  hybridIndex, count := lxIndexOfShare(hello.KeyShares, utls.X25519MLKEM768)
+  x25519Index, _ := lxIndexOfShare(hello.KeyShares, utls.X25519)
+  require.NotEqual(t, -1, hybridIndex, "hybrid key share must be present")
+  require.Equal(t, 1, count)
+  require.Less(t, hybridIndex, x25519Index)
+  require.NotEqual(t, -1, lxIndexOfCurve(hello.SupportedCurves, utls.X25519MLKEM768))
+  firstFlight := lxRealityFirstFlight(t, client)
+  require.GreaterOrEqual(t, lxTLSRecordCount(t, firstFlight), 2,
+    "direct hybrid REALITY ClientHello must be split into TLS records")
+}
+
 // --- SPEC 089 -----------------------------------------------------------------
 
 // Default (empty) key_share keeps SPEC 083: the fingerprint's hybrid share goes
