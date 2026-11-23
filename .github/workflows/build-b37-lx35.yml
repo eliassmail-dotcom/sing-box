@@ -26,7 +26,7 @@ jobs:
       - name: Checkout (LX sources, no submodules yet)
         uses: actions/checkout@v5
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Merge upstream stable LX.35 into b36 source (preserve local b36 extensions)
         shell: bash
