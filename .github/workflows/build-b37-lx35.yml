@@ -61,6 +61,15 @@ jobs:
           for old, new in sites:
               assert t.count(old) == 1, (old, t.count(old))
               t = t.replace(old, new.replace('\\n', '\n').replace('\\t', '\t'), 1)
+          # LX35 exposes RecordFragment as *bool (nil means unspecified).
+          # Keep b36 default-on-detour semantics, but honor explicit false.
+          assert t.count('if options.Options.Fragment || options.Options.RecordFragment {') == 1
+          t = t.replace('if options.Options.Fragment || options.Options.RecordFragment {',
+                        'if options.Options.Fragment || options.Options.RecordFragment != nil {')
+          assert t.count('options.Options.RecordFragment = true') == 1
+          t = t.replace('options.Options.RecordFragment = true',
+                        'recordFragment := true\\n\\toptions.Options.RecordFragment = &recordFragment')
+          t = t.replace('\\n', '\n').replace('\\t', '\t')
           assert "DialedThroughDetour bool" in t
           assert t.count("sniffGuardConnLx(") == 3
           p.write_text(t)
