@@ -42,6 +42,29 @@ jobs:
           git -c user.name="LX IPA Builder" -c user.email="github-actions@users.noreply.github.com" \
             merge --no-commit --no-ff -X ours lx35-upstream
           test -z "$(git ls-files -u)"
+          # LX35 removed the b36 ClientOptions.DialedThroughDetour path.
+          # Restore our b36 authenticated-IP-race TLS implementation, retaining
+          # LX35's new sniffGuardConnLx in its three handshake call sites.
+          git show HEAD:common/tls/client.go > common/tls/client.go
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("common/tls/client.go")
+          t = p.read_text()
+          sites = [
+            ('ctx, stage := beginHandshakeLx(ctx, config) // lx: SPEC 139',
+             'ctx, stage := beginHandshakeLx(ctx, config) // lx: SPEC 139\\n\\tconn = sniffGuardConnLx(ctx, conn, config) // LX35'),
+            ('handshakeCtx, stage := beginHandshakeLx(attemptCtx, config)',
+             'handshakeCtx, stage := beginHandshakeLx(attemptCtx, config)\\n\\t\\t\\t\\traw = sniffGuardConnLx(handshakeCtx, raw, config) // LX35'),
+            ('handshakeCtx, stage := beginHandshakeLx(ctx, d.config)',
+             'handshakeCtx, stage := beginHandshakeLx(ctx, d.config)\\n\\tconn = sniffGuardConnLx(handshakeCtx, conn, d.config) // LX35'),
+          ]
+          for old, new in sites:
+              assert t.count(old) == 1, (old, t.count(old))
+              t = t.replace(old, new.replace('\\n', '\n').replace('\\t', '\t'), 1)
+          assert "DialedThroughDetour bool" in t
+          assert t.count("sniffGuardConnLx(") == 3
+          p.write_text(t)
+          PY
           echo "Merged upstream files:"
           git diff HEAD --stat | tail -45
           # Guard core features added after the upstream base.
