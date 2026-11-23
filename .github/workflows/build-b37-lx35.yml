@@ -68,8 +68,7 @@ jobs:
                         'if options.Options.Fragment || options.Options.RecordFragment != nil {')
           assert t.count('options.Options.RecordFragment = true') == 1
           t = t.replace('options.Options.RecordFragment = true',
-                        'recordFragment := true\\n\\toptions.Options.RecordFragment = &recordFragment')
-          t = t.replace('\\n', '\n').replace('\\t', '\t')
+                        'recordFragment := true\\n\\toptions.Options.RecordFragment = &recordFragment'.replace('\\n', chr(10)).replace('\\t', chr(9)))
           assert "DialedThroughDetour bool" in t
           assert t.count("sniffGuardConnLx(") == 3
           p.write_text(t)
