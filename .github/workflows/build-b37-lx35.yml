@@ -251,7 +251,7 @@ jobs:
           APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO")
           test "$APP_VERSION" = "1.14.9"
-          test "$APP_BUILD" = "36"
+          test "$APP_BUILD" = "37"
           echo "Packaging sing-box lx++ $APP_VERSION ($APP_BUILD)"
           # Cross-target build consistency is mandatory for sideloaded IPA.
           COUNT=0
@@ -276,7 +276,8 @@ jobs:
             "appVersion": "1.14.9",
             "build": 37,
             "appleCommit": "$(git -C .. rev-parse HEAD)",
-            "coreCommit": "${GITHUB_SHA}",\n            "mergedUpstream": "Leadaxe/sing-box-lx/v1.14.4-lx.35",
+            "coreCommit": "${GITHUB_SHA}",
+            "mergedUpstream": "Leadaxe/sing-box-lx/v1.14.4-lx.35",
             "embeddedGeneratorVersion": "v1.4.48r6",
             "tcpConcurrent": "opt-in verified TLS/REALITY per outbound",
             "coreBaseline": "feature/lx-reality-hybrid-frag-b36 + Leadaxe/lx35",
