@@ -391,12 +391,11 @@ func (s *Stage) LostRace(winner *Stage) {
 // mark, a refusal that ends before the transport stage's OK looks like a
 // failed attempt the dial recovered from, and the root cause is lost.
 //
-// The mark excludes recovery by ANY ancestor, not just the immediate one.
-// That is the contract: a definitive failure belongs to the conn of its dial,
-// and the pipeline walks a dial once — no stage above retries it within the
-// same trace (recovery scenarios such as a group's parallel dials end their
-// losers as lost_race instead). An ancestor's OK that follows a definitive
-// failure is the same race artifact, not a real recovery.
+// The mark exempts the failure from recovery by ANY ancestor — not just the
+// immediate one — but only while its own dial did not fail: when a failed
+// ancestor is recovered by an OK above it (the penalty fallback dial of a
+// URLTest group replaces the whole dial), the definitive failure is recovered
+// along with it, and a later failure stays the root cause.
 func (s *Stage) Definitive() {
 	if s == nil {
 		return
@@ -596,10 +595,28 @@ func rootCause(stages []*Stage) uint32 {
 	// server. It stays in the trace but is not what stopped the pipeline. A
 	// failure that ends after its ancestor's OK (an XHTTP response refused
 	// once the lazily dialed transport returned) is not recovered. A stage
-	// marked Definitive is never recovered either: its failure is the answer
-	// of its step however the race lands.
+	// marked Definitive is not recovered by an OK ancestor either — its
+	// failure is the answer of its step however the race lands — UNLESS the
+	// dial it belongs to failed as well: a failed ancestor recovered by an OK
+	// above it (the penalty fallback dial of a URLTest group replaces the
+	// whole dial) recovers the definitive failure along with it.
+	dialFailedAbove := make(map[uint32]bool, len(stages))
 	for _, s := range stages {
-		if !failed[s.id] || definitive[s.id] {
+		if !failed[s.id] {
+			continue
+		}
+		for ancestor := s.parent; ancestor != nil; ancestor = ancestor.parent {
+			if failed[ancestor.id] {
+				dialFailedAbove[s.id] = true
+				break
+			}
+		}
+	}
+	for _, s := range stages {
+		if !failed[s.id] {
+			continue
+		}
+		if definitive[s.id] && !dialFailedAbove[s.id] {
 			continue
 		}
 		for ancestor := s.parent; ancestor != nil; ancestor = ancestor.parent {

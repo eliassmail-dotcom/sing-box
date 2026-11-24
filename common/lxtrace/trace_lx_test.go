@@ -316,6 +316,48 @@ func TestRootCauseDefinitiveWithLostRace(t *testing.T) {
 	if lost := stageByID(summary, loser.ID()); lost.Result != Skipped {
 		t.Fatalf("loser must stay Skipped: %+v", lost)
 	}
+
+	// The marks on one stage: LostRace ends it Skipped before Definitive
+	// could keep a failure — a race loser is never a root cause.
+	trace2 := New(Options{})
+	ctx = With(context.Background(), trace2)
+	_, group := Begin(ctx, "dial", "group")
+	_, l := Begin(ctx, "tcp_connect", "a")
+	_, w := Begin(ctx, "tcp_connect", "b")
+	l.Definitive()
+	l.LostRace(w)
+	w.End(nil)
+	group.End(nil)
+	if root := trace2.Finish(nil).RootCause; root != 0 {
+		t.Fatalf("a lost race stays out of the root cause even marked definitive, got %d", root)
+	}
+}
+
+// The reviewer scenario of a fallback dial: the first node's dial fails with
+// a definitive refusal, the group recovers it with a second node, and a later
+// failure is the root cause — the recovered refusal must not win the race of
+// end times (SPEC 139 §5.2).
+func TestRootCauseDefinitiveRecoveredWithDial(t *testing.T) {
+	trace := New(Options{})
+	ctx := With(context.Background(), trace)
+	groupCtx, group := Begin(ctx, "dial", "urltest")
+	nodeCtx, node1 := Begin(groupCtx, "dial", "node1")
+	transportCtx, transport := Begin(nodeCtx, "transport", "xhttp")
+	_, response := Begin(transportCtx, "transport_response", "xhttp")
+	response.Definitive()
+	response.End(errors.New("open download: timeout"))
+	transport.End(errors.New("dial failed"))
+	node1.End(errors.New("dial failed"))
+	_, node2 := Begin(groupCtx, "dial", "node2")
+	node2.End(nil)
+	group.End(nil) // the fallback conn makes the group's dial a success
+	_, late := Begin(ctx, "first_byte", "target")
+	late.End(errors.New("timeout"))
+	summary := trace.Finish(nil)
+	if summary.RootCause != late.ID() {
+		t.Fatalf("root = %d, want the later failure %d, not the recovered refusal %d",
+			summary.RootCause, late.ID(), response.ID())
+	}
 }
 
 func TestFinishClosesRunningStages(t *testing.T) {
