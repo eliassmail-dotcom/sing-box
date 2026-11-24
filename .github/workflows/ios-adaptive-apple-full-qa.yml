@@ -1,0 +1,102 @@
+name: iOS adaptive reliability - full Apple tag gate
+run-name: F1-F3 full Apple tags and Libbox compile (no IPA)
+on:
+  push:
+    branches:
+      - qa/ios-adaptive-apple-full-r2
+permissions:
+  contents: read
+  actions: read
+jobs:
+  apple-qa:
+    runs-on: xcode-27
+    timeout-minutes: 60
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: bee9d1d621d8045fd685a3072102d27917092bcc
+      - name: Retrieve exact prepared merge
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-adaptive-prepared-source
+          run-id: 45387900148
+          github-token: ${{ github.token }}
+          path: /tmp/ios-prepared-full
+      - name: Checkout and verify prepared source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git bundle verify /tmp/ios-prepared-full/prepared.bundle
+          git fetch /tmp/ios-prepared-full/prepared.bundle HEAD
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = a56ef789e3a6f139ecd5d5bfdf0a64d66976a88b
+          git fetch origin refs/heads/qa/ios-adaptive-prepared-758a0f37-r2
+          test "$(git rev-parse FETCH_HEAD)" = d12ceba514a500939df9ad9df7a004361680b50d
+          git diff --exit-code HEAD FETCH_HEAD -- . ':(exclude).github/workflows/**'
+          grep -q 'go realityClientFallback(ctx, uConn' common/tls/reality_client.go
+          grep -q 'const adaptiveFragmentPreparedLx = true' common/tls/adaptive_fragment_lx.go
+          git submodule sync --recursive -- submodules/
+          git submodule update --init --recursive -- submodules/
+          for dep in utls wireguard-go sing-tun gvisor; do
+            test -f "submodules/$dep/go.mod"
+            test "$(git -C "submodules/$dep" rev-parse HEAD)" = "$(git rev-parse "HEAD:submodules/$dep")"
+          done
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.10
+          cache: false
+      - name: Derive complete production Apple tags from build_libbox
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          text = Path("cmd/internal/build_libbox/main.go").read_text()
+          shared = []
+          for match in re.finditer(r'^\s*(?:sharedTags|darwinTags) = append\((?:sharedTags|darwinTags), ([^\n]+)\)', text, re.M):
+              shared += re.findall(r'"([^"]+)"', match.group(1))
+          apple = text.split("func buildApple() {", 1)[1].split("func ", 1)[0]
+          assert 'tags := append(sharedTags, darwinTags...)' in apple
+          assert 'tags = append(tags, "with_clash_api")' in apple
+          assert '"-tags-not-macos=with_low_memory"' in apple
+          tags = list(dict.fromkeys(shared + ["with_clash_api", "with_low_memory"]))
+          required = {"with_utls", "with_lx_chain", "with_lx_idle_suspend", "with_xhttp", "with_clash_api", "with_low_memory", "with_openconnect", "with_naive_outbound", "with_tailscale"}
+          assert required.issubset(tags), tags
+          line = "APPLE_TAGS=" + " ".join(tags)
+          print(line)
+          with open(os.environ["GITHUB_ENV"], "a") as out:
+              out.write(line + "\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+              out.write("Production Apple tags (including iOS low-memory):\n\n\x60" + line + "\x60\n")
+          PY
+      - name: Compile prepared source with full Apple tags
+        shell: bash
+        run: |
+          go build -ldflags '-checklinkname=0' -tags "$APPLE_TAGS" ./...
+      - name: Full Apple tags regression race tests
+        shell: bash
+        run: |
+          go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' -tags "$APPLE_TAGS" ./common/dialer/ ./common/urltest/ ./common/tls/... ./option/ ./route/... ./protocol/group/... ./protocol/vless/ ./protocol/chain/ ./transport/v2rayxhttp/ ./experimental/libbox/
+          go test -count=1 -timeout=8m -ldflags '-checklinkname=0' -tags "$APPLE_TAGS" ./protocol/vless/encryption/
+      - name: Assert real REALITY and prepared F3 tests are present
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -ldflags '-checklinkname=0' -tags "$APPLE_TAGS" -list 'Test(LXAdaptiveFragment|LXIPRaceRequiresActualREALITYAuthentication|LXFinalMask|LxRealityFinalMask)' ./common/tls/ | tee /tmp/ios-adaptive-full-testlist
+          grep -q '^TestLXAdaptiveFragmentConfigGate$' /tmp/ios-adaptive-full-testlist
+          grep -q '^TestLXAdaptiveFragmentCloneAndWire$' /tmp/ios-adaptive-full-testlist
+          grep -q '^TestLXIPRaceRequiresActualREALITYAuthentication$' /tmp/ios-adaptive-full-testlist
+          grep -Eq '^Test(LXFinalMask|LxRealityFinalMask)' /tmp/ios-adaptive-full-testlist
+      - name: Compile actual iOS Libbox only (no app / IPA)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          bash .github/patch_go_for_ios.sh
+          make lib_install
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          go run ./cmd/internal/build_libbox -target apple -platform ios/arm64,iossimulator/arm64
+          test -d Libbox.xcframework
+          echo 'Actual iOS device and simulator Libbox compilation passed. No IPA built.' >> "$GITHUB_STEP_SUMMARY"
