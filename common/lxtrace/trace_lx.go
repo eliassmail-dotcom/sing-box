@@ -390,6 +390,13 @@ func (s *Stage) LostRace(winner *Stage) {
 // the lazily-processed response against the dial's return lands: without the
 // mark, a refusal that ends before the transport stage's OK looks like a
 // failed attempt the dial recovered from, and the root cause is lost.
+//
+// The mark excludes recovery by ANY ancestor, not just the immediate one.
+// That is the contract: a definitive failure belongs to the conn of its dial,
+// and the pipeline walks a dial once — no stage above retries it within the
+// same trace (recovery scenarios such as a group's parallel dials end their
+// losers as lost_race instead). An ancestor's OK that follows a definitive
+// failure is the same race artifact, not a real recovery.
 func (s *Stage) Definitive() {
 	if s == nil {
 		return
@@ -568,6 +575,7 @@ func rootCause(stages []*Stage) uint32 {
 	failed := make(map[uint32]bool, len(stages))
 	ends := make(map[uint32]time.Time, len(stages))
 	succeeded := make(map[uint32]time.Time, len(stages))
+	definitive := make(map[uint32]bool, len(stages))
 	for _, s := range stages {
 		s.access.Lock()
 		if s.result == Failed && !s.hasAttr("lost_race") {
@@ -576,6 +584,9 @@ func rootCause(stages []*Stage) uint32 {
 		}
 		if s.result == OK {
 			succeeded[s.id] = s.end
+		}
+		if s.hasAttr("definitive") {
+			definitive[s.id] = true
 		}
 		s.access.Unlock()
 	}
@@ -588,7 +599,7 @@ func rootCause(stages []*Stage) uint32 {
 	// marked Definitive is never recovered either: its failure is the answer
 	// of its step however the race lands.
 	for _, s := range stages {
-		if !failed[s.id] || s.hasAttr("definitive") {
+		if !failed[s.id] || definitive[s.id] {
 			continue
 		}
 		for ancestor := s.parent; ancestor != nil; ancestor = ancestor.parent {

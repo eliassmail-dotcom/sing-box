@@ -292,6 +292,32 @@ func TestLostRaceExcludedFromRoot(t *testing.T) {
 	}
 }
 
+// A definitive failure keeps the root cause next to a lost race and next to
+// an OK ancestor, whatever the end order (SPEC 139 §5.2). A stage marked
+// Definitive cannot be a lost race: LostRace ends it Skipped, out of the
+// failed set — the definitive mark simply stays inert there.
+func TestRootCauseDefinitiveWithLostRace(t *testing.T) {
+	trace := New(Options{})
+	ctx := With(context.Background(), trace)
+	ctx1, dial := Begin(ctx, "dial", "node")
+	_, loser := Begin(ctx1, "tcp_connect", "[2001:db8::1]:443")
+	_, winner := Begin(ctx1, "tcp_connect", "192.0.2.1:443")
+	loser.LostRace(winner)
+	winner.End(nil)
+	_, response := Begin(ctx1, "transport_response", "xhttp")
+	response.Definitive()
+	response.End(errors.New("status 404"))
+	dial.End(nil) // the dial's OK does not recover the definitive refusal
+	summary := trace.Finish(nil)
+	if summary.RootCause != response.ID() {
+		t.Fatalf("root = %d, want the definitive refusal %d, not the lost race %d",
+			summary.RootCause, response.ID(), loser.ID())
+	}
+	if lost := stageByID(summary, loser.ID()); lost.Result != Skipped {
+		t.Fatalf("loser must stay Skipped: %+v", lost)
+	}
+}
+
 func TestFinishClosesRunningStages(t *testing.T) {
 	trace := New(Options{})
 	ctx := With(context.Background(), trace)
