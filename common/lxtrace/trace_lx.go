@@ -384,6 +384,19 @@ func (s *Stage) LostRace(winner *Stage) {
 	s.finish(Skipped, "")
 }
 
+// Definitive marks the stage's failure as the answer of its step, not an
+// attempt an ancestor could recover from by ending OK after it (SPEC 139
+// §5.2). An XHTTP download refusal decides the conn whichever way the race of
+// the lazily-processed response against the dial's return lands: without the
+// mark, a refusal that ends before the transport stage's OK looks like a
+// failed attempt the dial recovered from, and the root cause is lost.
+func (s *Stage) Definitive() {
+	if s == nil {
+		return
+	}
+	s.Attr("definitive", "true")
+}
+
 // EndRace closes the stage like End, except that a failure while ctx is
 // cancelled — not timed out — is a loser of a race a sibling won, such as a
 // DNS group's parallel query answered by another member: the request's ctx is
@@ -571,9 +584,11 @@ func rootCause(stages []*Stage) uint32 {
 	// TrustTunnel replacing a stale session), a lookup answered by another
 	// server. It stays in the trace but is not what stopped the pipeline. A
 	// failure that ends after its ancestor's OK (an XHTTP response refused
-	// once the lazily dialed transport returned) is not recovered.
+	// once the lazily dialed transport returned) is not recovered. A stage
+	// marked Definitive is never recovered either: its failure is the answer
+	// of its step however the race lands.
 	for _, s := range stages {
-		if !failed[s.id] {
+		if !failed[s.id] || s.hasAttr("definitive") {
 			continue
 		}
 		for ancestor := s.parent; ancestor != nil; ancestor = ancestor.parent {

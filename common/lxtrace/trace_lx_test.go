@@ -776,6 +776,20 @@ func TestRootCauseSkipsRecoveredFailure(t *testing.T) {
 		t.Fatalf("root = %d, want the late refusal %d", root, response.ID())
 	}
 
+	// A definitive failure is the root cause whichever way the race of the
+	// lazy response against the dial's return lands: even ended before the
+	// ancestor's OK it does not look like an attempt the dial recovered from.
+	trace = New(Options{})
+	ctx = With(context.Background(), trace)
+	transportCtx, transport = Begin(ctx, "transport", "xhttp")
+	_, response = Begin(transportCtx, "transport_response", "xhttp")
+	response.Definitive()
+	response.End(errors.New("status 404"))
+	transport.End(nil)
+	if root := trace.Finish(nil).RootCause; root != response.ID() {
+		t.Fatalf("root = %d, want the definitive refusal %d", root, response.ID())
+	}
+
 	trace = New(Options{})
 	ctx = With(context.Background(), trace)
 	dialCtx, dial = Begin(ctx, "dial", "masque")

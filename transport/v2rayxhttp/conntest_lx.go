@@ -86,6 +86,10 @@ func (t *xhttpTrace) response(response *http.Response, err error) {
 	if response != nil {
 		child.Attr("http_status", strconv.Itoa(response.StatusCode))
 	}
+	// The refusal decides the conn whether it lands before or after the
+	// transport stage's OK (the response is processed outside the dial), so it
+	// can never look like an attempt the dial recovered from.
+	child.Definitive()
 	child.End(err)
 }
 
