@@ -161,7 +161,7 @@ func TestPriorityFallback_ThreeTierFailureRecoveryAndRotation(t *testing.T) {
     g.failover = false
     g.priorityOutbounds = map[string]bool{"base":true}
     g.secondaryPriorityOutbounds = map[string]bool{"chain-a":true, "chain-b":true}
-    check := func(want adapter.Outbound) {
+    check := func(want *failoverNode) {
         t.Helper()
         if _, err := g.URLTest(context.Background()); err != nil { t.Fatal(err) }
         assertSelected(t, g, N.NetworkTCP, want)
