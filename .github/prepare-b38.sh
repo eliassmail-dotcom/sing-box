@@ -3,6 +3,15 @@ set -euxo pipefail
 git fetch --no-tags --force https://github.com/Leadaxe/sing-box-lx.git \
   refs/tags/v1.14.4-lx.35:refs/tags/lx35-upstream
 UPSTREAM_SHA=$(git rev-parse lx35-upstream^{commit})
+# lx:build-parity — pin the expected upstream commit so the merge is
+# reproducible: fail loudly if the remote tag moved instead of silently
+# preparing a different base (peer review #8, F-06). When bumping to a new
+# upstream release, update this pin deliberately.
+EXPECTED_UPSTREAM_SHA=f1bac271853eaf13398ce1030c948aebc3aed2e1
+if [ "$UPSTREAM_SHA" != "$EXPECTED_UPSTREAM_SHA" ]; then
+  echo "upstream v1.14.4-lx.35 moved: expected $EXPECTED_UPSTREAM_SHA, got $UPSTREAM_SHA" >&2
+  exit 1
+fi
 git merge-base HEAD "$UPSTREAM_SHA" >/dev/null
 echo "Upstream LX35 commit: $UPSTREAM_SHA"
 # Prefer our custom extensions where source edits overlap; accept all
