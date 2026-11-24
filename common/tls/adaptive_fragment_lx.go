@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/lxsniffguard"
 	"github.com/sagernet/sing-box/option"
 	N "github.com/sagernet/sing/common/network"
 )
@@ -15,14 +16,14 @@ import (
 // Unprepared b39 has a bool record_fragment and cannot distinguish omitted
 // from explicit false. prepare-b38 patches these two gates once LX35 and
 // FinalMask are present. Fail closed in every other build.
-const adaptiveFragmentPreparedLx = false
+const adaptiveFragmentPreparedLx = true
 
 func adaptiveFragmentConfiguredLx(options option.OutboundTLSOptions) bool {
-	return false // prepared eligibility
+	return !options.Fragment && options.RecordFragment == nil && options.FinalMaskFragment == nil && options.FragmentFallbackDelay == 0 && options.Spoof == "" && options.SpoofMethod == ""
 }
 
 func adaptiveFragmentContextAllowedLx(ctx context.Context) bool {
-	return false // prepared context eligibility
+	return lxsniffguard.AttemptFromContext(ctx) == nil
 }
 
 // The caller is the native, direct, iOS VLESS construction path. The
@@ -47,7 +48,7 @@ func applyAdaptiveFragmentModeLx(ctx context.Context, config Config) {
 // or ClientHello construction. Preserve the underlying error and its text.
 type lxRealityTransportFailure struct{ error }
 
-func (e lxRealityTransportFailure) Unwrap() error { return e.error }
+func (e lxRealityTransportFailure) Unwrap() error                   { return e.error }
 func (lxRealityTransportFailure) LXAdaptiveFragmentRetryable() bool { return true }
 
 func classifyRealityTransportFailureLx(ctx context.Context, err error) error {

@@ -23,8 +23,8 @@ import (
 const lxVerifiedIPAttemptTimeout = time.Second
 
 const (
-	lxVerifiedTCPTimeout = time.Second
-	lxVerifiedTLSTimeout = 1500 * time.Millisecond
+	lxVerifiedTCPTimeout   = time.Second
+	lxVerifiedTLSTimeout   = 1500 * time.Millisecond
 	lxVerifiedTotalTimeout = lxVerifiedTCPTimeout + lxVerifiedTLSTimeout
 )
 

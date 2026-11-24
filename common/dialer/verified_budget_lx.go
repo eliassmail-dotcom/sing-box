@@ -11,7 +11,7 @@ import (
 // are penalized by the adaptive path. Preserve the original error chain.
 type lxDefinitiveTCPFailure struct{ error }
 
-func (e lxDefinitiveTCPFailure) Unwrap() error { return e.error }
+func (e lxDefinitiveTCPFailure) Unwrap() error                 { return e.error }
 func (lxDefinitiveTCPFailure) LXIPRaceDefinitiveFailure() bool { return true }
 
 func shouldRecordIPFailureLx(err error, strict bool) bool {

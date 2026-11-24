@@ -11,9 +11,9 @@ type SelectorOutboundOptions struct {
 type URLTestOutboundOptions struct {
 	Outbounds                 []string           `json:"outbounds" reference:"outbound"`
 	URL                       string             `json:"url,omitempty"`
-	URLs                      []string           `json:"urls,omitempty"` // LX: any successful endpoint proves node health (max 3)
+	URLs                      []string           `json:"urls,omitempty"`              // LX: any successful endpoint proves node health (max 3)
 	TolerancePercent          uint8              `json:"tolerance_percent,omitempty"` // LX: 0=legacy absolute tolerance, 1..100=adaptive relative threshold
-	MinHold                   badoption.Duration `json:"min_hold,omitempty"` // LX: least_test minimum hold for healthy nodes; outages bypass
+	MinHold                   badoption.Duration `json:"min_hold,omitempty"`          // LX: least_test minimum hold for healthy nodes; outages bypass
 	Interval                  badoption.Duration `json:"interval,omitempty"`
 	Tolerance                 uint16             `json:"tolerance,omitempty"`
 	IdleTimeout               badoption.Duration `json:"idle_timeout,omitempty"`

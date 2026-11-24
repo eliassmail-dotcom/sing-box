@@ -32,14 +32,14 @@ const (
 // lxIPRace is owned by one outbound's resolve dialer, not shared across
 // different VPN endpoints. It is safe for concurrent URLTest/application dials.
 type lxIPRace struct {
-	mu           sync.Mutex
-	generation   uint64
-	winner       netip.Addr
+	mu                  sync.Mutex
+	generation          uint64
+	winner              netip.Addr
 	winnerAuthenticated bool
-	winnerRTT    time.Duration
-	winnerExpiry time.Time
-	failed       map[netip.AddrPort]time.Time
-	fragmentModes map[netip.AddrPort]*lxFragmentModeEntry
+	winnerRTT           time.Duration
+	winnerExpiry        time.Time
+	failed              map[netip.AddrPort]time.Time
+	fragmentModes       map[netip.AddrPort]*lxFragmentModeEntry
 }
 
 func newLXIPRace() *lxIPRace {
@@ -61,10 +61,10 @@ func (r *lxIPRace) resetHistory() {
 }
 
 type lxIPRaceResult struct {
-	addr    netip.Addr
-	conn    net.Conn
-	err     error
-	latency time.Duration
+	addr     netip.Addr
+	conn     net.Conn
+	err      error
+	latency  time.Duration
 	fragment *lxFragmentObservation
 }
 
