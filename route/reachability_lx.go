@@ -81,6 +81,12 @@ func (r *Router) reachability() (map[string]bool, map[string]selectionRefs) {
 
 // computeReachable runs the actual walk from the seeds (final + rule targets +
 // DNS-server detours).
+// IPWarmupReachableTags uses the actual routing graph even when idle suspend
+// is disabled. The speculative scheduler must never assume all tags are active.
+func (r *Router) IPWarmupReachableTags() map[string]bool {
+	return r.computeReachable()
+}
+
 func (r *Router) computeReachable() map[string]bool {
 	return r.computeReachability().reachable
 }

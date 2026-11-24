@@ -3,6 +3,7 @@ package box
 import (
 	"context"
 	"io"
+	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -62,6 +63,7 @@ type Box struct {
 	ntpService          *ntp.Service
 	scope               *adapter.Scope
 	quiesced            atomic.Bool // lx: SPEC 030 — QuiesceForShutdown runs once
+	ipWarmup            *urltest.IPWarmupCoordinator
 }
 
 type Options struct {
@@ -145,6 +147,13 @@ func New(options Options) (*Box, error) {
 	}
 
 	ctx = pause.WithDefaultManager(ctx)
+	var ipWarmup *urltest.IPWarmupCoordinator
+	var keepWarmup bool
+	if runtime.GOOS == "ios" {
+		ipWarmup = urltest.NewIPWarmupCoordinator(ctx)
+		ctx = service.ContextWithPtr(ctx, ipWarmup)
+		defer func() { if !keepWarmup { ipWarmup.Stop() } }()
+	}
 	experimentalOptions := common.PtrValueOrDefault(options.Experimental)
 	debugOptions := common.PtrValueOrDefault(experimentalOptions.Debug)
 	err := checkDebugOptions(debugOptions)
@@ -495,6 +504,7 @@ func New(options Options) (*Box, error) {
 		})
 		timeService.TimeService = ntpService
 	}
+	keepWarmup = true
 	return &Box{
 		network:             networkManager,
 		endpoint:            endpointManager,
@@ -509,6 +519,7 @@ func New(options Options) (*Box, error) {
 		referenceManager:    referenceManager,
 		httpClientService:   httpClientService,
 		createdAt:           createdAt,
+		ipWarmup:            ipWarmup,
 		debugOptions:        debugOptions,
 		logFactory:          logFactory,
 		logger:              logFactory.Logger(),
@@ -680,10 +691,16 @@ func (s *Box) start() error {
 	if err != nil {
 		return err
 	}
+	if s.ipWarmup != nil {
+		s.ipWarmup.Start(s.outbound, s.router.IPWarmupReachableTags)
+	}
 	return nil
 }
 
 func (s *Box) Close() error {
+	if s.ipWarmup != nil {
+		s.ipWarmup.Stop()
+	}
 	// lx: SPEC 030 — fast shutdown. Stop the idle/urltest tick and close every
 	// WG/AWG UDP socket BEFORE the scope closes the endpoints. Without this,
 	// endpoints are torn down while the tick is still issuing wakes: each

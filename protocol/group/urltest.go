@@ -533,7 +533,11 @@ func (g *URLTestGroup) PostStart() {
 	// lx: SPEC 019 v2 — seed the pool so round_robin can route from the first connection,
 	// before the first health-check completes (history-warm nodes first, else config order).
 	g.seedPool()
-	go g.CheckOutbounds(g.ctx, false)
+	finish := urltest.BeginIPWarmupStartupProbe(g.ctx)
+	go func() {
+		defer finish()
+		g.CheckOutbounds(g.ctx, false)
+	}()
 }
 
 func (g *URLTestGroup) Touch() {
@@ -825,6 +829,10 @@ func urlTestOutbounds(ctx context.Context, outboundManager adapter.OutboundManag
 }
 
 func urlTestOutboundsLinks(ctx context.Context, outboundManager adapter.OutboundManager, history *urltest.HistoryStorage, logger log.Logger, outbounds []adapter.Outbound, links []string, interval time.Duration, force bool, onAlive func(tag string)) map[string]uint16 {
+	// Reserve the plan before batch.Go can block on concurrency. This only
+	// suppresses speculative warmup; it never delays an ordinary URLTest.
+	finishPlan := urltest.PlanIPWarmupURLTests(ctx, outboundManager, outbounds)
+	defer finishPlan()
 	// lx: 050 — keep the per-node test context on the batch context: it descends
 	// from the caller's ctx (and so from g.ctx, which Close cancels), so both the
 	// batch's own cancellation and any deadline the caller passed in reach the probes.

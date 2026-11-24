@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/service"
 )
@@ -40,6 +41,11 @@ type selectionRefs struct {
 // this is a harmless flag store.
 func (r *Router) InvalidateReachability() {
 	r.reachDirty.Store(true)
+	if r.ctx != nil {
+		if warmup := service.PtrFromContext[urltest.IPWarmupCoordinator](r.ctx); warmup != nil {
+			warmup.SelectionChanged()
+		}
+	}
 }
 
 // QuiesceForShutdown prepares the router for a fast box shutdown (SPEC 030),

@@ -19,6 +19,10 @@ func (d *DefaultDialer) dialParallelInterface(ctx context.Context, dialer net.Di
 	if len(primaryInterfaces)+len(fallbackInterfaces) == 0 {
 		return nil, false, E.New("no available network interface")
 	}
+	if isAuthenticatedIPWarmup(ctx) && len(primaryInterfaces)+len(fallbackInterfaces) != 1 {
+		// Background budget counts candidate TCP sockets; no nested fanout.
+		return nil, ErrAuthenticatedIPWarmupComplete
+	}
 	defaultInterface := d.networkManager.InterfaceMonitor().DefaultInterface()
 	if len(primaryInterfaces)+len(fallbackInterfaces) == 1 {
 		var (
@@ -113,6 +117,10 @@ func (d *DefaultDialer) dialParallelInterfaceFastFallback(ctx context.Context, d
 	primaryInterfaces, fallbackInterfaces := selectInterfaces(d.networkManager, strategy, interfaceType, fallbackInterfaceType)
 	if len(primaryInterfaces)+len(fallbackInterfaces) == 0 {
 		return nil, false, E.New("no available network interface")
+	}
+	if isAuthenticatedIPWarmup(ctx) && len(primaryInterfaces)+len(fallbackInterfaces) != 1 {
+		// Background budget counts candidate TCP sockets; no nested fanout.
+		return nil, ErrAuthenticatedIPWarmupComplete
 	}
 	defaultInterface := d.networkManager.InterfaceMonitor().DefaultInterface()
 	if len(primaryInterfaces)+len(fallbackInterfaces) == 1 {

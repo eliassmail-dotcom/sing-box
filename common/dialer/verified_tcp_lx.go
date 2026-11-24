@@ -68,6 +68,9 @@ func (d *resolveDialer) DialVerifiedTCP(
 	if len(addresses) == 0 {
 		return nil, errors.New("tcp_concurrent: DNS returned no addresses")
 	}
+	if isAuthenticatedIPWarmup(ctx) && (!d.adaptiveVerifiedTCP || !d.ipRace.needsAuthenticatedWarmup(generation, addresses)) {
+		return nil, ErrAuthenticatedIPWarmupComplete
+	}
 	return d.ipRace.dialAtGeneration(ctx, destination, addresses, addresses[0].Is6(), generation, d.adaptiveVerifiedTCP,
 		func(raceCtx context.Context, ip netip.Addr) (net.Conn, error) {
 			return dialVerifiedCandidateLx(raceCtx, len(addresses) > 1, d.adaptiveVerifiedTCP,

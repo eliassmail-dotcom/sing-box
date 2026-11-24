@@ -35,6 +35,7 @@ type lxIPRace struct {
 	mu           sync.Mutex
 	generation   uint64
 	winner       netip.Addr
+	winnerAuthenticated bool
 	winnerRTT    time.Duration
 	winnerExpiry time.Time
 	failed       map[netip.AddrPort]time.Time
@@ -51,6 +52,7 @@ func (r *lxIPRace) resetHistory() {
 	defer r.mu.Unlock()
 	r.generation++
 	r.winner = netip.Addr{}
+	r.winnerAuthenticated = false
 	r.winnerRTT = 0
 	r.winnerExpiry = time.Time{}
 	clear(r.failed)
@@ -69,6 +71,7 @@ func (r *lxIPRace) ordered(addresses []netip.Addr, port uint16, preferIPv6 bool)
 	now := time.Now()
 	if now.After(r.winnerExpiry) {
 		r.winner = netip.Addr{}
+		r.winnerAuthenticated = false
 		r.winnerRTT = 0
 	}
 	for ip, until := range r.failed {
@@ -134,6 +137,10 @@ func (r *lxIPRace) currentGeneration() uint64 {
 }
 
 func (r *lxIPRace) recordWinner(generation uint64, ip netip.Addr, measured time.Duration) {
+	r.recordRaceWinner(generation, ip, measured, false)
+}
+
+func (r *lxIPRace) recordRaceWinner(generation uint64, ip netip.Addr, measured time.Duration, authenticated bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if generation != r.generation {
@@ -142,6 +149,7 @@ func (r *lxIPRace) recordWinner(generation uint64, ip netip.Addr, measured time.
 	if r.winner == ip && r.winnerRTT > 0 {
 		measured = r.winnerRTT + (measured-r.winnerRTT)/8
 	}
+	r.winnerAuthenticated = authenticated
 	r.winner = ip
 	r.winnerRTT = measured
 	r.winnerExpiry = time.Now().Add(lxIPRaceWinnerTTL)
@@ -160,6 +168,7 @@ func (r *lxIPRace) recordFailure(generation uint64, ip netip.Addr, port uint16) 
 	}
 	if r.winner == ip {
 		r.winner = netip.Addr{}
+		r.winnerAuthenticated = false
 		r.winnerRTT = 0
 		r.winnerExpiry = time.Time{}
 	}
@@ -217,17 +226,21 @@ func (r *lxIPRace) dialAtGeneration(
 	// buffered result and close the socket rather than leaking a loser.
 	defer func() {
 		cancel()
-		go func() {
+		drain := func() {
 			workers.Wait()
 			close(results)
-		}()
-		go func() {
 			for result := range results {
 				if result.conn != nil {
 					_ = result.conn.Close()
 				}
 			}
-		}()
+		}
+		if isAuthenticatedIPWarmup(ctx) {
+			// Keep the scheduler's slot until every speculative loser is closed.
+			drain()
+		} else {
+			go drain()
+		}
 	}()
 
 	next, active := 0, 0
@@ -268,7 +281,12 @@ func (r *lxIPRace) dialAtGeneration(
 					_ = outcome.conn.Close()
 					return nil, ctx.Err()
 				}
-				r.recordWinner(generation, outcome.addr, outcome.latency)
+				r.recordRaceWinner(generation, outcome.addr, outcome.latency, strictFailures)
+				if isAuthenticatedIPWarmup(ctx) {
+					// Close the verified winner before waiting for slower losers.
+					_ = outcome.conn.Close()
+					return nil, ErrAuthenticatedIPWarmupComplete
+				}
 				return outcome.conn, nil
 			}
 			if outcome.conn != nil {
