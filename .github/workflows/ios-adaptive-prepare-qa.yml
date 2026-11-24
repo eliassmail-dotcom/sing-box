@@ -70,7 +70,7 @@ jobs:
           git diff --exit-code "$source_sha" "$snapshot_sha" -- .github/workflows/
           git diff --exit-code "$prepared_sha" "$snapshot_sha" -- . ':(exclude).github/workflows/**'
           git reset --hard "$prepared_sha"
-          if git push origin "$snapshot_sha":refs/heads/qa/ios-adaptive-prepared-758a0f37; then
+          if git push origin "$snapshot_sha":refs/heads/qa/ios-adaptive-prepared-758a0f37-r2; then
             printf 'Published review snapshot: %s\n' "$snapshot_sha" | tee -a /tmp/ios-prepared-review/provenance.txt "$GITHUB_STEP_SUMMARY"
           else
             echo 'Snapshot push refused; exact prepared merge remains available as a Git bundle.' | tee -a "$GITHUB_STEP_SUMMARY"
@@ -82,6 +82,17 @@ jobs:
           path: /tmp/ios-prepared-review/
           if-no-files-found: error
           retention-days: 14
+      - name: Init pinned core dependencies from the prepared gitlinks
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git submodule sync --recursive -- submodules/
+          git submodule update --init --recursive -- submodules/
+          for dep in utls wireguard-go sing-tun gvisor; do
+            test -f "submodules/$dep/go.mod"
+            test "$(git -C "submodules/$dep" rev-parse HEAD)" = "$(git rev-parse "HEAD:submodules/$dep")"
+          done
+          git submodule status --recursive -- submodules/
       - name: Compile prepared host source
         run: |
           go build -ldflags '-checklinkname=0' ./...
