@@ -1,0 +1,83 @@
+name: iOS adaptive reliability - prepare and QA only
+run-name: iOS F1-F3 prepared tree review (no IPA)
+on:
+  push:
+    branches:
+      - qa/ios-adaptive-source-758a0f37
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: ios-adaptive-prepare-qa-758a0f37
+  cancel-in-progress: false
+jobs:
+  prepared-qa:
+    if: github.ref == 'refs/heads/qa/ios-adaptive-source-758a0f37'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GOTOOLCHAIN: local
+      QA_TAGS: with_utls with_lx_command with_lx_chain with_lx_idle_suspend with_xhttp with_quic
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.10
+          cache: false
+      - name: Execute actual release preparation (no packaging)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          source_sha=$(git rev-parse HEAD)
+          echo "source_sha=$source_sha" >> "$GITHUB_ENV"
+          bash .github/prepare-b38.sh
+          grep -q 'secondary_priority_outbounds' option/group.go
+          gofmt -w option/group.go protocol/group/urltest{,_penalty_lx,_cycle_lx,_priority_fallback_lx_test}.go
+          gofmt -w adapter/adaptive_record_fragment_lx.go common/dialer/{adaptive_fragment_lx,adaptive_fragment_lx_test,authenticated_warmup_lx,authenticated_warmup_lx_test,tcp_concurrent_lx,verified_tcp_lx,verified_budget_lx}.go common/tls/adaptive_fragment*.go common/urltest/ip_warmup*.go protocol/vless/ip_warmup_lx.go
+          test -z "$(git ls-files -u)"
+          grep -q 'const adaptiveFragmentPreparedLx = true' common/tls/adaptive_fragment_lx.go
+          grep -q 'options.RecordFragment == nil' common/tls/adaptive_fragment_lx.go
+          grep -q 'options.FinalMaskFragment == nil' common/tls/adaptive_fragment_lx.go
+          grep -q 'classifyRealityTransportFailureLx(ctx, err)' common/tls/reality_client.go
+          grep -q 'lxRealityVerificationFailure{}' common/tls/reality_client.go
+          grep -q 'DialVerifiedTCPAdaptiveFragmentLx' common/tls/client.go
+          grep -q 'recordRaceWinnerWithFragment' common/dialer/tcp_concurrent_lx.go
+          grep -q 'BeginIPWarmupStartupProbe' protocol/group/urltest.go
+          grep -q 'IPWarmupCoordinator' box.go
+          grep -q 'NewAdaptiveRealityDialerLx' protocol/vless/outbound.go
+      - name: Publish the actual prepared source snapshot for independent review
+        shell: bash
+        run: |
+          set -euxo pipefail
+          upstream_sha=$(cat /tmp/lx35-upstream-sha)
+          git add -A
+          git -c user.name="iOS QA" -c user.email="github-actions@users.noreply.github.com" commit -m "qa(ios): prepare F1-F3 source with LX35 and FinalMask" -m "Source: $source_sha; upstream: $upstream_sha. Prepared tree; no release."
+          git merge-base --is-ancestor "$source_sha" HEAD
+          git merge-base --is-ancestor "$upstream_sha" HEAD
+          git push origin HEAD:refs/heads/qa/ios-adaptive-prepared-758a0f37
+          printf 'Prepared commit: %s\nSource: %s\nLX35: %s\n' "$(git rev-parse HEAD)" "$source_sha" "$upstream_sha" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Compile prepared host source
+        run: |
+          go build -ldflags '-checklinkname=0' ./...
+          go build -ldflags '-checklinkname=0' -tags "$QA_TAGS" ./common/tls/ ./protocol/vless/ ./protocol/chain/ ./transport/v2rayxhttp/ ./experimental/libbox/
+      - name: Core regression and REALITY verification
+        run: |
+          go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' ./common/dialer/ ./common/urltest/ ./common/tls/ ./option/ ./protocol/group/ ./route/ ./protocol/vless/
+          go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' -tags "$QA_TAGS" ./common/dialer/ ./common/urltest/ ./common/tls/ ./option/ ./protocol/group/ ./route/ ./protocol/vless/
+      - name: Chain, XHTTP, Smart priority and startup regression
+        run: |
+          go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' -tags "$QA_TAGS" ./protocol/chain/ ./transport/v2rayxhttp/ ./experimental/libbox/
+          go test -count=1 -timeout=8m -ldflags '-checklinkname=0' -tags "$QA_TAGS" ./protocol/vless/encryption/
+          go vet -tags "$QA_TAGS" ./common/dialer/ ./common/urltest/ ./common/tls/ ./protocol/vless/ ./protocol/group/ ./route/
+      - name: Explicit prepared F3 / real authentication / FinalMask gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -count=1 -ldflags '-checklinkname=0' -tags "$QA_TAGS" -list 'Test(LXAdaptiveFragment|LXIPRaceRequiresActualREALITYAuthentication|LXFinalMask|LxRealityFinalMask)' ./common/tls/ | tee /tmp/ios-qa-tests
+          grep -q '^TestLXAdaptiveFragmentConfigGate$' /tmp/ios-qa-tests
+          grep -q '^TestLXAdaptiveFragmentCloneAndWire$' /tmp/ios-qa-tests
+          grep -q '^TestLXIPRaceRequiresActualREALITYAuthentication$' /tmp/ios-qa-tests
+          grep -Eq '^Test(LXFinalMask|LxRealityFinalMask)' /tmp/ios-qa-tests
+          go test -race -count=1 -timeout=8m -ldflags '-checklinkname=0' -tags "$QA_TAGS" -run 'Test(LXAdaptiveFragment|LXIPRaceRequiresActualREALITYAuthentication|LXFinalMask|LxRealityFinalMask|LxRealityDirectHybridRecordFragmentCombinedFirstFlight)' ./common/tls/ ./option/
