@@ -39,8 +39,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin fix/b39-smart-three-tier
-          git -C clients/apple checkout --detach 1816910a30b1cf49b4bddcf24306481bcbdd3232
-          test "$(git -C clients/apple rev-parse HEAD)" = "1816910a30b1cf49b4bddcf24306481bcbdd3232"
+          git -C clients/apple checkout --detach b1f300366afc85e22ecb1ebd57c0141ef5a63381
+          test "$(git -C clients/apple rev-parse HEAD)" = "b1f300366afc85e22ecb1ebd57c0141ef5a63381"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -66,7 +66,7 @@ jobs:
           grep -q 'hasSharedContainer' clients/apple/Library/Network/ExtensionProfile.swift
           grep -q 'appendLimitedSubscriptionByte' clients/apple/ApplicationLibrary/LocalGenerator/LocalGeneratorEngine.swift
           grep -q 'webViewWebContentProcessDidTerminate' clients/apple/ApplicationLibrary/LocalGenerator/LocalGeneratorEngine.swift
-          grep -q 'if tag == preferredFallbackTag { continue }' clients/apple/Library/Network/LXProfileOverrides.swift
+          grep -q 'if tag == preferredFallbackTag || tag == legacyFallbackTag { continue }' clients/apple/Library/Network/LXProfileOverrides.swift
           grep -q 'disallowedFields' clients/apple/Library/Network/LXProfileOverrides.swift
           grep -q 'testInheritedModeNormalizationWhenOtherOverrideChangesProfile' clients/apple/SFUnitTests/LXProfileOverridesTests.swift
           grep -q 'v1.4.48r6 Yandex generator' clients/apple/ApplicationLibrary/LocalGenerator/LocalGeneratorBundle.swift

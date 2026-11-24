@@ -76,6 +76,16 @@ func (s *Selector) Network() []string {
 	return selected.Network()
 }
 
+// Migrate only the retired application-generated Strategy tag. Keep explicit
+// legacy selections when the old outbound still exists in a source profile.
+func migrateSmartSelection(group, selected string, tags []string) string {
+	if group == "Стратегия" && selected == "Авто · База → Белые" &&
+		!slices.Contains(tags, selected) && slices.Contains(tags, "Авто · Умный") {
+		return "Авто · Умный"
+	}
+	return selected
+}
+
 func (s *Selector) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	if stage != adapter.StartStateStart {
 		return nil
@@ -93,9 +103,15 @@ func (s *Selector) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 		if cacheFile != nil {
 			selected := cacheFile.LoadSelected(s.Tag())
 			if selected != "" {
-				detour, loaded := s.outbounds[selected]
+				migrated := migrateSmartSelection(s.Tag(), selected, s.tags)
+				detour, loaded := s.outbounds[migrated]
 				if loaded {
 					s.selected.Store(detour)
+					if migrated != selected {
+						if err := cacheFile.StoreSelected(s.Tag(), migrated); err != nil {
+							s.logger.Error("store migrated selected: ", err)
+						}
+					}
 					return nil
 				}
 			}
