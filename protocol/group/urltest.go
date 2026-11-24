@@ -60,6 +60,7 @@ type URLTest struct {
 	failover                     bool      // lx: SPEC 116 — mode: failover
 	passiveGuard                 *lxPassiveGuard // opt-in LX reliability
 	priorityOutbounds            map[string]bool // LX: tier-1 groups used before other outbounds
+	secondaryPriorityOutbounds   map[string]bool
 }
 
 func NewURLTest(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.URLTestOutboundOptions) (adapter.Outbound, error) {
@@ -89,7 +90,7 @@ func NewURLTest(ctx context.Context, router adapter.Router, logger log.ContextLo
 		}
 		if slices.Contains(options.URLs[:i], endpoint) { return nil, E.New("urltest: duplicate URLTest endpoint: ", endpoint) }
 	}
-	if len(options.PriorityOutbounds) > 0 && (failover || balancer != nil) {
+	if (len(options.PriorityOutbounds) > 0 || len(options.SecondaryPriorityOutbounds) > 0) && (failover || balancer != nil) {
 		return nil, E.New("urltest: priority_outbounds is only valid with least_test mode")
 	}
 	primary := make(map[string]bool, len(options.PriorityOutbounds))
@@ -101,6 +102,16 @@ func NewURLTest(ctx context.Context, router adapter.Router, logger log.ContextLo
 			return nil, E.New("urltest: duplicate priority outbound: ", preferred)
 		}
 		primary[preferred] = true
+	}
+	secondary := make(map[string]bool, len(options.SecondaryPriorityOutbounds))
+	if len(options.SecondaryPriorityOutbounds) > 0 && len(primary) == 0 {
+		return nil, E.New("urltest: secondary_priority_outbounds requires priority_outbounds")
+	}
+	for _, member := range options.SecondaryPriorityOutbounds {
+		if !slices.Contains(options.Outbounds, member) || primary[member] || secondary[member] {
+			return nil, E.New("urltest: invalid or overlapping secondary priority outbound: ", member)
+		}
+		secondary[member] = true
 	}
 	if warnFailoverTolerance(failover, options) {
 		logger.Warn("urltest: tolerance is ignored in failover mode")
@@ -122,6 +133,7 @@ func NewURLTest(ctx context.Context, router adapter.Router, logger log.ContextLo
 		balancer:                     balancer,
 		failover:                     failover,
 		priorityOutbounds:            primary,
+		secondaryPriorityOutbounds:   secondary,
 	}
 	if options.PassiveGuard { outbound.passiveGuard = newLXPassiveGuard() }
 	if len(outbound.tags) == 0 {
@@ -155,6 +167,7 @@ func (s *URLTest) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 		group.failover = s.failover // lx: SPEC 116
 		group.passiveGuard = s.passiveGuard
 		group.priorityOutbounds = s.priorityOutbounds // LX: preferred base groups before whitelist fallbacks
+		group.secondaryPriorityOutbounds = s.secondaryPriorityOutbounds
 		group.tolerancePercent = s.tolerancePercent
 		group.minHold = s.minHold
 		if len(s.links) > 0 { group.links = append([]string(nil), s.links...) }
@@ -456,6 +469,7 @@ type URLTestGroup struct {
 	groupTag                     string                    // lx: SPEC 020 — set by URLTest.Start (probe gating)
 	failover                     bool                      // lx: SPEC 116 — set by URLTest.Start
 	priorityOutbounds            map[string]bool           // LX: tags of preferred group outbounds
+	secondaryPriorityOutbounds   map[string]bool
 	passiveGuard                 *lxPassiveGuard // LX: opt-in diagnostics
 	lastTickRunEnd               atomic.Int64              // lx: SPEC 125 — end of the last non-forced probe run, UnixNano
 	failoverSlow                 atomic.Pointer[tagSet]    // lx: SPEC 126 — confirmed-slow held tags during a failover reselect
@@ -610,7 +624,14 @@ func (g *URLTestGroup) Select(network string) (adapter.Outbound, bool) {
 	return minOutbound, true
 }
 
-// selectPriority implements a two-tier URLTest. Availability and tier are
+// priorityTier returns 0 for Base, 1 for Russia chains, 2 for White/other.
+func (g *URLTestGroup) priorityTier(tag string) int {
+	if g.priorityOutbounds[tag] { return 0 }
+	if g.secondaryPriorityOutbounds[tag] { return 1 }
+	return 2
+}
+
+// selectPriority implements an ordered URLTest. Availability and tier are
 // evaluated first: a responsive preferred outbound always beats every fallback.
 // Within the winning tier, recent dial penalties rank candidates before RTT;
 // tolerance and hold then prevent unnecessary switches between equally healthy
@@ -622,12 +643,12 @@ func (g *URLTestGroup) selectPriority(network string) (adapter.Outbound, bool) {
 		current = udp
 	}
 	penaltyAware := g.penaltyEmergency(network)
-	choose := func(preferred bool) (adapter.Outbound, bool) {
+	choose := func(preferred int) (adapter.Outbound, bool) {
 		var best adapter.Outbound
 		var bestDelay uint16
 		var bestPenalty int64
 		for _, detour := range g.outbounds {
-			if g.priorityOutbounds[detour.Tag()] != preferred || !supportsNetwork(detour, network) {
+			if g.priorityTier(detour.Tag()) != preferred || !supportsNetwork(detour, network) {
 				continue
 			}
 			realTag := RealTag(detour, network)
@@ -652,7 +673,7 @@ func (g *URLTestGroup) selectPriority(network string) (adapter.Outbound, bool) {
 		}
 		// Hold only when the current node is at the best penalty level. A
 		// penalized current node must not pin the group to a worse candidate.
-		if current != nil && g.priorityOutbounds[current.Tag()] == preferred &&
+		if current != nil && g.priorityTier(current.Tag()) == preferred &&
 			supportsNetwork(current, network) && g.guardAllows(RealTag(current, network)) {
 			realTag := RealTag(current, network)
 			currentPenalty := int64(0)
@@ -671,17 +692,14 @@ func (g *URLTestGroup) selectPriority(network string) (adapter.Outbound, bool) {
 		}
 		return best, true
 	}
-	if best, ok := choose(true); ok {
-		return best, true
-	}
-	if best, ok := choose(false); ok {
-		return best, true
+	for _, tier := range []int{0, 1, 2} {
+		if best, ok := choose(tier); ok { return best, true }
 	}
 	// Cold start: retain the documented tier order until a probe supplies
 	// health evidence; quarantine is still respected.
-	for _, preferred := range []bool{true, false} {
+	for _, preferred := range []int{0, 1, 2} {
 		for _, detour := range g.outbounds {
-			if g.priorityOutbounds[detour.Tag()] == preferred &&
+			if g.priorityTier(detour.Tag()) == preferred &&
 				supportsNetwork(detour, network) && g.guardAllows(RealTag(detour, network)) {
 				return detour, false
 			}

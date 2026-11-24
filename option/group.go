@@ -25,6 +25,8 @@ type URLTestOutboundOptions struct {
 	// This enables ordered base -> whitelist fallback with automatic recovery.
 	// Valid only in least_test mode; tags must also be present in outbounds.
 	PriorityOutbounds []string `json:"priority_outbounds,omitempty" reference:"outbound"`
+	// Optional middle tier: used after all primary members fail, before other outbounds.
+	SecondaryPriorityOutbounds []string `json:"secondary_priority_outbounds,omitempty" reference:"outbound"`
 	// LX: opt-in passive stall diagnostics, short node quarantine and suspect dial pacing.
 	// Disabled by default; only least_test/failover (not round_robin).
 	PassiveGuard bool `json:"passive_guard,omitempty"`

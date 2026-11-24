@@ -90,9 +90,9 @@ func (g *URLTestGroup) cycleNode(depth int) (string, error) {
 	if current != nil {
 		currentRealTag = RealTag(current, N.NetworkTCP)
 	}
-	allowedTier := false
+	allowedTier := 2
 	if len(g.priorityOutbounds) > 0 && current != nil {
-		allowedTier = g.priorityOutbounds[current.Tag()]
+		allowedTier = g.priorityTier(current.Tag())
 	}
 	candidates := make([]lxCycleCandidate, 0, len(g.outbounds))
 	seen := make(map[string]bool, len(g.outbounds))
@@ -100,7 +100,7 @@ func (g *URLTestGroup) cycleNode(depth int) (string, error) {
 		if !supportsNetwork(node, N.NetworkTCP) {
 			continue
 		}
-		if len(g.priorityOutbounds) > 0 && g.priorityOutbounds[node.Tag()] != allowedTier {
+		if len(g.priorityOutbounds) > 0 && g.priorityTier(node.Tag()) != allowedTier {
 			continue
 		}
 		realTag := RealTag(node, N.NetworkTCP)

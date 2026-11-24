@@ -151,3 +151,49 @@ func TestPriorityFallback_ConfigValidation(t *testing.T) {
     if err != nil {t.Fatal(err)}
     if !outbound.(*URLTest).priorityOutbounds["base"] {t.Fatal("missing primary")}
 }
+
+func TestPriorityFallback_ThreeTierFailureRecoveryAndRotation(t *testing.T) {
+    base := newFailoverNode("base", 120*time.Millisecond)
+    chainA := newFailoverNode("chain-a", 80*time.Millisecond)
+    chainB := newFailoverNode("chain-b", 90*time.Millisecond)
+    white := newFailoverNode("white", 5*time.Millisecond)
+    g := newFailoverTestGroup(t, base, chainA, chainB, white)
+    g.failover = false
+    g.priorityOutbounds = map[string]bool{"base":true}
+    g.secondaryPriorityOutbounds = map[string]bool{"chain-a":true, "chain-b":true}
+    check := func(want adapter.Outbound) {
+        t.Helper()
+        if _, err := g.URLTest(context.Background()); err != nil { t.Fatal(err) }
+        assertSelected(t, g, N.NetworkTCP, want)
+        assertSelected(t, g, N.NetworkUDP, want)
+        if got := g.pickForDialNode(N.NetworkTCP); got == nil || got.Tag() != want.Tag() { t.Fatalf("dial selected %v, want %s", got, want.Tag()) }
+    }
+    check(base)
+    base.setErr(context.DeadlineExceeded)
+    check(chainA)
+    if tag, err := g.cycleNode(0); err != nil || tag != "chain-b" { t.Fatalf("rotation must stay in chain tier: %q %v", tag, err) }
+    chainA.setErr(context.DeadlineExceeded)
+    chainB.setErr(context.DeadlineExceeded)
+    check(white)
+    chainA.setErr(nil)
+    check(chainA)
+    base.setErr(nil)
+    check(base)
+}
+
+func TestPriorityFallback_SecondaryValidation(t *testing.T) {
+    for _, opts := range []option.URLTestOutboundOptions{
+        {Outbounds: []string{"a","c","w"}, SecondaryPriorityOutbounds: []string{"c"}},
+        {Outbounds: []string{"a","c","w"}, PriorityOutbounds: []string{"a"}, SecondaryPriorityOutbounds: []string{"a"}},
+        {Outbounds: []string{"a","c","w"}, PriorityOutbounds: []string{"a"}, SecondaryPriorityOutbounds: []string{"missing"}},
+        {Outbounds: []string{"a","c","w"}, PriorityOutbounds: []string{"a"}, SecondaryPriorityOutbounds: []string{"c","c"}},
+        {Outbounds: []string{"a","c","w"}, PriorityOutbounds: []string{"a"}, SecondaryPriorityOutbounds: []string{"c"}, Mode:"failover"},
+    } {
+        if _, err := NewURLTest(context.Background(), nil, logger.NOP(), "root", opts); err == nil { t.Fatalf("invalid secondary config accepted: %+v", opts) }
+    }
+    outbound, err := NewURLTest(context.Background(), nil, logger.NOP(), "root", option.URLTestOutboundOptions{
+        Outbounds: []string{"a","c","w"}, PriorityOutbounds: []string{"a"}, SecondaryPriorityOutbounds: []string{"c"}, Mode:"least_test",
+    })
+    if err != nil { t.Fatal(err) }
+    if !outbound.(*URLTest).secondaryPriorityOutbounds["c"] { t.Fatal("missing secondary tier") }
+}

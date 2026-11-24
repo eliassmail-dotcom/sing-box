@@ -107,19 +107,19 @@ func (g *URLTestGroup) fastestByDelay(network string) adapter.Outbound {
 	// In a Smart priority group, evaluate the preferred tier first. A very fast
 	// White node must not hide repeated failures of the fastest still-healthy Base.
 	if len(g.priorityOutbounds) > 0 {
-		if best := g.fastestByDelayTier(network, true); best != nil {
-			return best
+		for _, tier := range []int{0, 1, 2} {
+			if best := g.fastestByDelayTier(network, tier); best != nil { return best }
 		}
-		return g.fastestByDelayTier(network, false)
+		return nil
 	}
-	return g.fastestByDelayTier(network, false)
+	return g.fastestByDelayTier(network, 2)
 }
 
-func (g *URLTestGroup) fastestByDelayTier(network string, preferred bool) adapter.Outbound {
+func (g *URLTestGroup) fastestByDelayTier(network string, preferred int) adapter.Outbound {
 	var minDelay uint16
 	var minOutbound adapter.Outbound
 	for _, detour := range g.outbounds {
-		if len(g.priorityOutbounds) > 0 && g.priorityOutbounds[detour.Tag()] != preferred {
+		if len(g.priorityOutbounds) > 0 && g.priorityTier(detour.Tag()) != preferred {
 			continue
 		}
 		if !supportsNetwork(detour, network) || !g.guardAllows(RealTag(detour, network)) {
@@ -148,12 +148,12 @@ func (g *URLTestGroup) penaltyEmergency(network string) bool {
 func (g *URLTestGroup) penaltyBest(network string, excludeTag string) adapter.Outbound {
 	if len(g.priorityOutbounds) > 0 {
 		// A successful fallback dial may not bypass another responsive primary.
-		for _, preferred := range []bool{true, false} {
+		for _, preferred := range []int{0, 1, 2} {
 			var choice adapter.Outbound
 			var minPenalty int64
 			var minDelay uint16
 			for _, detour := range g.outbounds {
-				if g.priorityOutbounds[detour.Tag()] != preferred || !supportsNetwork(detour, network) || !g.guardAllows(RealTag(detour, N.NetworkTCP)) { continue }
+				if g.priorityTier(detour.Tag()) != preferred || !supportsNetwork(detour, network) || !g.guardAllows(RealTag(detour, N.NetworkTCP)) { continue }
 				tag := RealTag(detour, N.NetworkTCP)
 				if tag == excludeTag || !g.guardAllows(tag) { continue }
 				history := g.history.LoadURLTestHistory(tag)
