@@ -1,0 +1,65 @@
+name: OpenWrt ARM64 b40 test
+on:
+  push:
+    branches: [build/openwrt-b40-arm64-test]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+      CGO_ENABLED: "0"
+      TAGS: with_gvisor,with_quic,with_dhcp,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0,with_xhttp,with_lx_command,with_lx_chain
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: d12ceba514a500939df9ad9df7a004361680b50d
+          fetch-depth: 1
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.10
+          cache: false
+      - name: Pin exact b40 prepared tree and dependencies
+        run: |
+          set -eux
+          test "$(git rev-parse HEAD)" = d12ceba514a500939df9ad9df7a004361680b50d
+          test "$(git rev-parse HEAD^{tree})" = 2631290510fe58a83b76feb778a72d2b15fe0f87
+          git submodule update --init --recursive submodules/utls submodules/wireguard-go submodules/sing-tun submodules/gvisor
+          for dep in utls wireguard-go sing-tun gvisor; do
+            test "$(git -C "submodules/$dep" rev-parse HEAD)" = "$(git rev-parse "HEAD:submodules/$dep")"
+          done
+      - name: Compile static ARM64 CLI
+        run: |
+          set -eux
+          mkdir -p dist
+          GOOS=linux GOARCH=arm64 GOARM64=v8.0 make -f Makefile.lx lx-build LX_TAGS="$TAGS" LX_VERSION=1.14.4-lx.35-b40-openwrt-test1 LX_OUTPUT=dist/sing-box
+          file dist/sing-box
+          readelf -h dist/sing-box
+          readelf -h dist/sing-box | grep -q AArch64
+          if readelf -l dist/sing-box | grep -q INTERP; then exit 1; fi
+          if readelf -d dist/sing-box | grep -q NEEDED; then exit 1; fi
+          go version -m dist/sing-box
+          stat -c '%s bytes' dist/sing-box
+          printf 'core=%s\ntree=%s\nfeatures=%s\n' "$(git rev-parse HEAD)" "$(git rev-parse HEAD^{tree})" "$TAGS" > dist/BUILD-MANIFEST.txt
+      - name: Smoke test under ARM64 emulation
+        run: |
+          set -eux
+          sudo apt-get update -qq
+          sudo apt-get install -y qemu-user
+          qemu-aarch64 dist/sing-box version
+          printf '%s\n' '{"inbounds":[{"type":"mixed","tag":"test","listen":"127.0.0.1","listen_port":18989}],"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}' > /tmp/openwrt-smoke.json
+          qemu-aarch64 dist/sing-box check -c /tmp/openwrt-smoke.json
+          (cd dist && sha256sum sing-box BUILD-MANIFEST.txt > SHA256SUMS)
+          tar -czf sing-box-b40-openwrt-arm64-test1.tar.gz -C dist sing-box BUILD-MANIFEST.txt SHA256SUMS
+          sha256sum sing-box-b40-openwrt-arm64-test1.tar.gz > sing-box-b40-openwrt-arm64-test1.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sing-box-b40-openwrt-arm64-test1
+          path: |
+            sing-box-b40-openwrt-arm64-test1.tar.gz
+            sing-box-b40-openwrt-arm64-test1.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
