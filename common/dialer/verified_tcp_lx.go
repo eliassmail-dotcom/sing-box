@@ -18,10 +18,21 @@ import (
 	N "github.com/sagernet/sing/common/network"
 )
 
-// Per-IP TCP+REALITY budget: with a 2s URLTest and three live slots,
-// a 1s per-address cap lets the sixth A record start before the URLTest
-// deadline even when the preceding five addresses silently blackhole.
+// Keep the legacy verified-race budget for other protocols. Native direct
+// VLESS REALITY opts in to independent stage budgets during construction.
 const lxVerifiedIPAttemptTimeout = time.Second
+
+const (
+	lxVerifiedTCPTimeout = time.Second
+	lxVerifiedTLSTimeout = 1500 * time.Millisecond
+	lxVerifiedTotalTimeout = lxVerifiedTCPTimeout + lxVerifiedTLSTimeout
+)
+
+// EnableAdaptiveVerifiedTCP is called only during outbound construction,
+// before the resolve dialer can be used concurrently.
+func (d *resolveDialer) EnableAdaptiveVerifiedTCP() {
+	d.adaptiveVerifiedTCP = d.ipRace != nil
+}
 
 // IPRaceEnabled is false for every non-opt-in resolve dialer, preserving the
 // ordinary sing-box TLS and ECH call path.
@@ -49,6 +60,7 @@ func (d *resolveDialer) DialVerifiedTCP(
 	if err := d.initialize(); err != nil {
 		return nil, err
 	}
+	generation := d.ipRace.currentGeneration()
 	addresses, err := d.lookupLx(ctx, destination.Fqdn)
 	if err != nil {
 		return nil, err
@@ -56,40 +68,11 @@ func (d *resolveDialer) DialVerifiedTCP(
 	if len(addresses) == 0 {
 		return nil, errors.New("tcp_concurrent: DNS returned no addresses")
 	}
-	return d.ipRace.dial(ctx, destination, addresses, addresses[0].Is6(),
+	return d.ipRace.dialAtGeneration(ctx, destination, addresses, addresses[0].Is6(), generation, d.adaptiveVerifiedTCP,
 		func(raceCtx context.Context, ip netip.Addr) (net.Conn, error) {
-			// Do not let a TCP-accepting but REALITY-silent endpoint occupy
-			// one of the three slots indefinitely. The outer URLTest/request
-			// deadline remains authoritative.
-			attemptCtx := raceCtx
-			cancel := func() {}
-			if len(addresses) > 1 {
-				attemptCtx, cancel = context.WithTimeout(raceCtx, lxVerifiedIPAttemptTimeout)
-			}
-			defer cancel()
-			conn, err := d.dialer.DialContext(
-				attemptCtx, N.NetworkTCP, M.SocksaddrFrom(ip, destination.Port))
-			if err != nil {
-				return nil, err
-			}
-			// The callback is responsible for TLS negotiation; on any
-			// handshake error the underlying TCP socket must be closed.
-			verified, err := verify(attemptCtx, conn)
-			if err != nil {
-				_ = conn.Close()
-				if verified != nil {
-					_ = verified.Close()
-				}
-				return nil, err
-			}
-			if verified == nil {
-				_ = conn.Close()
-				return nil, errors.New("tcp_concurrent: verifier returned nil connection")
-			}
-			if err := attemptCtx.Err(); err != nil {
-				_ = verified.Close()
-				return nil, err
-			}
-			return verified, nil
+			return dialVerifiedCandidateLx(raceCtx, len(addresses) > 1, d.adaptiveVerifiedTCP,
+				func(tcpCtx context.Context) (net.Conn, error) {
+					return d.dialer.DialContext(tcpCtx, N.NetworkTCP, M.SocksaddrFrom(ip, destination.Port))
+				}, verify)
 		})
 }

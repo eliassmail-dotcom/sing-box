@@ -159,7 +159,7 @@ func (e *RealityClientConfig) ClientHandshake(ctx context.Context, conn net.Conn
 
 	if !verifier.verified {
 		go realityClientFallback(e.ctx, uConn, e.uClient.ServerName(), e.uClient.id)
-		return nil, E.New("reality verification failed")
+		return nil, lxRealityVerificationFailure{}
 	}
 
 	releaseHandshakeState(uConn) // lx: SPEC 122 — drop the ClientHello, key shares and extensions after a verified handshake

@@ -43,6 +43,7 @@ type resolveDialer struct {
 	queryOptions  adapter.DNSQueryOptions
 	fallbackDelay time.Duration
 	ipRace        *lxIPRace
+	adaptiveVerifiedTCP bool // enabled during VLESS native REALITY construction only
 }
 
 func NewResolveDialer(ctx context.Context, dialer N.Dialer, parallel bool, server string, queryOptions adapter.DNSQueryOptions, fallbackDelay time.Duration) ResolveDialer {
@@ -101,6 +102,7 @@ func (d *resolveDialer) DialContext(ctx context.Context, network string, destina
 	if !destination.IsDomain() {
 		return d.dialer.DialContext(ctx, network, destination)
 	}
+	generation := d.ipRace.currentGeneration()
 	ctx = log.ContextWithOverrideLevel(ctx, log.LevelDebug)
 	addresses, err := d.lookupLx(ctx, destination.Fqdn) // lx: SPEC 139 — d.router.Lookup inside a `lookup` stage
 	if err != nil {
@@ -110,7 +112,7 @@ func (d *resolveDialer) DialContext(ctx context.Context, network string, destina
 		return nil, E.New("DNS returned no IP addresses for ", destination.Fqdn)
 	}
 	if d.ipRace != nil && N.NetworkName(network) == N.NetworkTCP && len(addresses) > 1 {
-		return d.ipRace.dial(ctx, destination, addresses, addresses[0].Is6(),
+		return d.ipRace.dialAtGeneration(ctx, destination, addresses, addresses[0].Is6(), generation, false,
 			func(raceCtx context.Context, address netip.Addr) (net.Conn, error) {
 				return d.dialer.DialContext(raceCtx, network, M.SocksaddrFrom(address, destination.Port))
 			})
@@ -166,6 +168,7 @@ func (d *resolveParallelNetworkDialer) DialParallelInterface(ctx context.Context
 	if !destination.IsDomain() {
 		return d.dialer.DialContext(ctx, network, destination)
 	}
+	generation := d.ipRace.currentGeneration()
 	ctx = log.ContextWithOverrideLevel(ctx, log.LevelDebug)
 	addresses, err := d.lookupLx(ctx, destination.Fqdn) // lx: SPEC 139 — d.router.Lookup inside a `lookup` stage
 	if err != nil {
@@ -178,7 +181,7 @@ func (d *resolveParallelNetworkDialer) DialParallelInterface(ctx context.Context
 		fallbackDelay = d.fallbackDelay
 	}
 	if d.ipRace != nil && N.NetworkName(network) == N.NetworkTCP && len(addresses) > 1 {
-		return d.ipRace.dial(ctx, destination, addresses, addresses[0].Is6(),
+		return d.ipRace.dialAtGeneration(ctx, destination, addresses, addresses[0].Is6(), generation, false,
 			func(raceCtx context.Context, address netip.Addr) (net.Conn, error) {
 				return DialSerialNetwork(raceCtx, d.dialer, network, destination,
 					[]netip.Addr{address}, strategy, interfaceType, fallbackInterfaceType, fallbackDelay)

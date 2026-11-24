@@ -83,6 +83,12 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		// an unconditional NewDialer here wraps that nil config and SIGSEGVs on the
 		// first handshake (SPEC 045). Same guard as vmess.
 		if outbound.tlsConfig != nil {
+			// lx: iOS adaptive verified race, native direct VLESS+REALITY only.
+			if options.Transport == nil && options.TLS.Reality != nil && options.TLS.Reality.Enabled && options.Detour == "" && options.TCPConcurrent && options.ServerIsDomain() {
+				if adaptive, ok := outboundDialer.(interface{ EnableAdaptiveVerifiedTCP() }); ok {
+					adaptive.EnableAdaptiveVerifiedTCP()
+				}
+			}
 			outbound.tlsDialer = tls.NewDialer(outboundDialer, outbound.tlsConfig)
 		}
 		// lx:end tls-disabled-dialer

@@ -33,6 +33,7 @@ const (
 // different VPN endpoints. It is safe for concurrent URLTest/application dials.
 type lxIPRace struct {
 	mu           sync.Mutex
+	generation   uint64
 	winner       netip.Addr
 	winnerRTT    time.Duration
 	winnerExpiry time.Time
@@ -48,6 +49,7 @@ func newLXIPRace() *lxIPRace {
 func (r *lxIPRace) resetHistory() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.generation++
 	r.winner = netip.Addr{}
 	r.winnerRTT = 0
 	r.winnerExpiry = time.Time{}
@@ -122,9 +124,21 @@ func (r *lxIPRace) ordered(addresses []netip.Addr, port uint16, preferIPv6 bool)
 	return ordered, known, delay
 }
 
-func (r *lxIPRace) recordWinner(ip netip.Addr, measured time.Duration) {
+func (r *lxIPRace) currentGeneration() uint64 {
+	if r == nil {
+		return 0
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.generation
+}
+
+func (r *lxIPRace) recordWinner(generation uint64, ip netip.Addr, measured time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if generation != r.generation {
+		return
+	}
 	if r.winner == ip && r.winnerRTT > 0 {
 		measured = r.winnerRTT + (measured-r.winnerRTT)/8
 	}
@@ -138,9 +152,12 @@ func (r *lxIPRace) recordWinner(ip netip.Addr, measured time.Duration) {
 	}
 }
 
-func (r *lxIPRace) recordFailure(ip netip.Addr, port uint16) {
+func (r *lxIPRace) recordFailure(generation uint64, ip netip.Addr, port uint16) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if generation != r.generation {
+		return
+	}
 	if r.winner == ip {
 		r.winner = netip.Addr{}
 		r.winnerRTT = 0
@@ -165,8 +182,25 @@ func (r *lxIPRace) dial(
 	preferIPv6 bool,
 	dialOne func(context.Context, netip.Addr) (net.Conn, error),
 ) (net.Conn, error) {
+	return r.dialAtGeneration(ctx, destination, addresses, preferIPv6, r.currentGeneration(), false, dialOne)
+}
+
+// dialAtGeneration accepts an epoch captured before DNS lookup. A late old
+// network result may finish, but it cannot change current network history.
+func (r *lxIPRace) dialAtGeneration(
+	ctx context.Context,
+	destination M.Socksaddr,
+	addresses []netip.Addr,
+	preferIPv6 bool,
+	generation uint64,
+	strictFailures bool,
+	dialOne func(context.Context, netip.Addr) (net.Conn, error),
+) (net.Conn, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if generation != r.currentGeneration() {
+		return nil, context.Canceled
 	}
 	ordered, _, delay := r.ordered(addresses, destination.Port, preferIPv6)
 	if len(ordered) == 0 {
@@ -234,7 +268,7 @@ func (r *lxIPRace) dial(
 					_ = outcome.conn.Close()
 					return nil, ctx.Err()
 				}
-				r.recordWinner(outcome.addr, outcome.latency)
+				r.recordWinner(generation, outcome.addr, outcome.latency)
 				return outcome.conn, nil
 			}
 			if outcome.conn != nil {
@@ -247,7 +281,9 @@ func (r *lxIPRace) dial(
 				outcome.err = errors.New("tcp_concurrent: dial returned no connection")
 			}
 			failures = append(failures, outcome.err)
-			r.recordFailure(outcome.addr, destination.Port)
+			if shouldRecordIPFailureLx(outcome.err, strictFailures) {
+				r.recordFailure(generation, outcome.addr, destination.Port)
+			}
 			// Do not wait for the timer when an address fails quickly.
 			if next < len(ordered) && active < lxIPRaceMaxConcurrent {
 				start()
