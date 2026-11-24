@@ -28,6 +28,15 @@ for path, cls, constructor in [
       (oldclone, oldclone + "\n\t\tfinalMask: c.finalMask,"),
       (oldinit, oldinit.replace("options.Fragment ||", "options.FinalMaskFragment != nil || options.Fragment ||") + "\n\t\tfinalMask: options.FinalMaskFragment,"),
     ])
+# F3 is fail-closed on the unprepared b39 bool representation. Only this
+# LX35+FinalMask preparation can distinguish an omitted record_fragment from
+# an explicit false, and detect FinalMask and per-handshake sniff_guard.
+patch("common/tls/adaptive_fragment_lx.go", [
+    ('"github.com/sagernet/sing-box/adapter"', '"github.com/sagernet/sing-box/adapter"\n\t"github.com/sagernet/sing-box/common/lxsniffguard"'),
+    ('const adaptiveFragmentPreparedLx = false', 'const adaptiveFragmentPreparedLx = true'),
+    ('return false // prepared eligibility', 'return !options.Fragment && options.RecordFragment == nil && options.FinalMaskFragment == nil && options.FragmentFallbackDelay == 0 && options.Spoof == "" && options.SpoofMethod == ""'),
+    ('return false // prepared context eligibility', 'return lxsniffguard.AttemptFromContext(ctx) == nil'),
+])
 patch("common/tls/client.go", [
     ("if options.Options.Fragment || options.Options.RecordFragment != nil {", "if options.Options.FinalMaskFragment != nil || options.Options.Fragment || options.Options.RecordFragment != nil {"),
     ("applyDetourFragmentDefault(&options)", """if options.Options.FinalMaskFragment != nil && options.Options.Engine != "" && options.Options.Engine != C.TLSEngineGo {

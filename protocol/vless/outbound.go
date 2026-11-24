@@ -96,6 +96,9 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 				}
 			}
 			outbound.tlsDialer = tls.NewDialer(outboundDialer, outbound.tlsConfig)
+			if outbound.ipWarmup != nil && options.Transport == nil && options.TLS.Reality != nil && options.TLS.Reality.Enabled && !tls.DialedThroughDetour(options.DialerOptions) && options.TCPConcurrent && options.ServerIsDomain() {
+				outbound.tlsDialer = tls.NewAdaptiveRealityDialerLx(outboundDialer, outbound.tlsConfig, *options.TLS)
+			}
 		}
 		// lx:end tls-disabled-dialer
 	}

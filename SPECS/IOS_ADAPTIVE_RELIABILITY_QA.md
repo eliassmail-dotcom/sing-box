@@ -24,3 +24,7 @@ QA before release GO (unit tests only; no IPA build):
 - F3 and final regression matrix to be added before release gate.
 
 Device QA after authorized IPA: home Wi-Fi, office Wi-Fi, LTE, network switch, direct multi-IP and single-IP, Ru chain, White, Gemini, corporate, Smart Three-Tier, XHTTP/FinalMask. Measure peak Network Extension memory, socket/worker cleanup after optional warmup, time to first usable connection, and verify no extra traffic for fresh nodes. No performance claim before measurement.
+
+F1 final GO: GLM verified pushed 04a9de62e; build and affected race suites PASS. F3 review pending.
+
+F3: per-IP direct native VLESS REALITY adaptive record fragmentation, iOS only. The unprepared b39 bool record_fragment cannot distinguish omitted from explicit false; feature is intentionally fail-closed until prepare-b38 applies LX35 pointer semantics plus FinalMask/sniff_guard exclusions. Test prepared and unprepared eligibility separately. Preserve single-distinct-IP behavior. One retry in same candidate, same absolute total budget (<=2.5s), no retry on TCP/auth/config failure or caller cancellation. Minimum residual budget 300ms. Cache only consumed authenticated winners, per outbound/IP/port/epoch, TTL 10m; invalidate observed failed cached mode without erasing a newer concurrent entry. No cache writes by late losers. On transient failure of a previously fragmented cached mode, try plain once with residual budget. No explicit fragment, spoof, FinalMask, detour, transport, or sniff_guard override.

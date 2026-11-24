@@ -189,10 +189,11 @@ type Dialer interface {
 type defaultDialer struct {
 	dialer N.Dialer
 	config Config
+	adaptiveRecordFragment bool
 }
 
 func NewDialer(dialer N.Dialer, config Config) Dialer {
-	return &defaultDialer{dialer, config}
+	return &defaultDialer{dialer: dialer, config: config}
 }
 
 func (d *defaultDialer) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
@@ -220,11 +221,22 @@ func (d *defaultDialer) dialContext(ctx context.Context, destination M.Socksaddr
 		IPRaceEnabled() bool
 		DialVerifiedTCP(context.Context, M.Socksaddr, func(context.Context, net.Conn) (net.Conn, error)) (net.Conn, error)
 	}); ok && verifiedDialer.IPRaceEnabled() && destination.IsDomain() {
-		verifiedConn, raceErr := verifiedDialer.DialVerifiedTCP(ctx, destination,
+		dialVerified := verifiedDialer.DialVerifiedTCP
+		if d.adaptiveRecordFragment && adaptiveFragmentContextAllowedLx(ctx) {
+			if adaptive, ok := d.dialer.(interface {
+				DialVerifiedTCPAdaptiveFragmentLx(context.Context, M.Socksaddr, func(context.Context, net.Conn) (net.Conn, error)) (net.Conn, error)
+			}); ok {
+				dialVerified = adaptive.DialVerifiedTCPAdaptiveFragmentLx
+			}
+		}
+		verifiedConn, raceErr := dialVerified(ctx, destination,
 			func(attemptCtx context.Context, raw net.Conn) (net.Conn, error) {
 				// REALITY/uTLS configs contain per-handshake state. Do not
 				// share it between concurrent ClientHello attempts.
 				config := d.config.Clone()
+				if d.adaptiveRecordFragment {
+					applyAdaptiveFragmentModeLx(attemptCtx, config)
+				}
 				handshakeCtx, stage := beginHandshakeLx(attemptCtx, config)
 				tlsConn, err := aTLS.ClientHandshake(handshakeCtx, raw, config)
 				endHandshakeLx(handshakeCtx, stage, tlsConn, err)

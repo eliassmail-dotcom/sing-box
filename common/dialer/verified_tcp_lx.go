@@ -51,6 +51,25 @@ func (d *resolveDialer) DialVerifiedTCP(
 	destination M.Socksaddr,
 	verify func(context.Context, net.Conn) (net.Conn, error),
 ) (net.Conn, error) {
+	return d.dialVerifiedTCP(ctx, destination, verify, false)
+}
+
+// A separate optional capability confines F3 to this dial. In particular,
+// DNS lookups do not inherit an adaptive-fragment policy for other endpoints.
+func (d *resolveDialer) DialVerifiedTCPAdaptiveFragmentLx(
+	ctx context.Context,
+	destination M.Socksaddr,
+	verify func(context.Context, net.Conn) (net.Conn, error),
+) (net.Conn, error) {
+	return d.dialVerifiedTCP(ctx, destination, verify, true)
+}
+
+func (d *resolveDialer) dialVerifiedTCP(
+	ctx context.Context,
+	destination M.Socksaddr,
+	verify func(context.Context, net.Conn) (net.Conn, error),
+	fragmentRequested bool,
+) (net.Conn, error) {
 	if d.ipRace == nil {
 		return nil, errors.New("tcp_concurrent: verified dialing requires opt-in")
 	}
@@ -71,11 +90,19 @@ func (d *resolveDialer) DialVerifiedTCP(
 	if isAuthenticatedIPWarmup(ctx) && (!d.adaptiveVerifiedTCP || !d.ipRace.needsAuthenticatedWarmup(generation, addresses)) {
 		return nil, ErrAuthenticatedIPWarmupComplete
 	}
-	return d.ipRace.dialAtGeneration(ctx, destination, addresses, addresses[0].Is6(), generation, d.adaptiveVerifiedTCP,
-		func(raceCtx context.Context, ip netip.Addr) (net.Conn, error) {
-			return dialVerifiedCandidateLx(raceCtx, len(addresses) > 1, d.adaptiveVerifiedTCP,
-				func(tcpCtx context.Context) (net.Conn, error) {
-					return d.dialer.DialContext(tcpCtx, N.NetworkTCP, M.SocksaddrFrom(ip, destination.Port))
-				}, verify)
+	multi := hasMultipleDistinctIPsLx(addresses)
+	fragmentEnabled := multi && d.adaptiveVerifiedTCP && fragmentRequested
+	return d.ipRace.dialAtGenerationWithFragment(ctx, destination, addresses, addresses[0].Is6(), generation, d.adaptiveVerifiedTCP,
+		func(raceCtx context.Context, ip netip.Addr) (net.Conn, error, *lxFragmentObservation) {
+			dial := func(tcpCtx context.Context) (net.Conn, error) {
+				return d.dialer.DialContext(tcpCtx, N.NetworkTCP, M.SocksaddrFrom(ip, destination.Port))
+			}
+			if !fragmentEnabled {
+				conn, err := dialVerifiedCandidateLx(raceCtx, len(addresses) > 1, d.adaptiveVerifiedTCP, dial, verify)
+				return conn, err, nil
+			}
+			key := netip.AddrPortFrom(ip.Unmap(), destination.Port)
+			cached := d.ipRace.loadFragmentMode(generation, key)
+			return dialAdaptiveFragmentCandidateLx(raceCtx, key, cached, dial, verify)
 		})
 }
