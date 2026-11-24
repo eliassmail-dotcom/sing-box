@@ -391,11 +391,11 @@ func (s *Stage) LostRace(winner *Stage) {
 // mark, a refusal that ends before the transport stage's OK looks like a
 // failed attempt the dial recovered from, and the root cause is lost.
 //
-// The mark exempts the failure from recovery by ANY ancestor — not just the
-// immediate one — but only while its own dial did not fail: when a failed
-// ancestor is recovered by an OK above it (the penalty fallback dial of a
-// URLTest group replaces the whole dial), the definitive failure is recovered
-// along with it, and a later failure stays the root cause.
+// The mark makes the failure follow its nearest failed ancestor instead of
+// any OK ancestor: it stays a root-cause candidate unless that ancestor was
+// itself recovered by an OK above it — the whole dial was replaced (the
+// penalty fallback dial of a URLTest group). An OK between the two — the
+// transport stage's own OK after an async refusal — proves nothing.
 func (s *Stage) Definitive() {
 	if s == nil {
 		return
@@ -594,36 +594,50 @@ func rootCause(stages []*Stage) uint32 {
 	// TrustTunnel replacing a stale session), a lookup answered by another
 	// server. It stays in the trace but is not what stopped the pipeline. A
 	// failure that ends after its ancestor's OK (an XHTTP response refused
-	// once the lazily dialed transport returned) is not recovered. A stage
-	// marked Definitive is not recovered by an OK ancestor either — its
-	// failure is the answer of its step however the race lands — UNLESS the
-	// dial it belongs to failed as well: a failed ancestor recovered by an OK
-	// above it (the penalty fallback dial of a URLTest group replaces the
-	// whole dial) recovers the definitive failure along with it.
-	dialFailedAbove := make(map[uint32]bool, len(stages))
+	// once the lazily dialed transport returned) is not recovered.
+	//
+	// A stage marked Definitive is governed by its nearest failed ancestor
+	// instead: recovered exactly when that ancestor is recovered by an OK
+	// above itself — the whole dial was replaced (a fallback) — while an OK
+	// between the two proves nothing. With no failed ancestor at all the
+	// failure is the answer of its step however the race lands: not recovered.
+	nearestFailed := make(map[uint32]*Stage, len(stages))
 	for _, s := range stages {
 		if !failed[s.id] {
 			continue
 		}
 		for ancestor := s.parent; ancestor != nil; ancestor = ancestor.parent {
 			if failed[ancestor.id] {
-				dialFailedAbove[s.id] = true
+				nearestFailed[s.id] = ancestor
 				break
 			}
 		}
+	}
+	// recoveredOf reports whether the failure was recovered: a non-definitive
+	// stage by an OK ancestor that ended after it; a definitive one by the
+	// fate of its nearest failed ancestor.
+	var recoveredOf func(s *Stage) bool
+	recoveredOf = func(s *Stage) bool {
+		if !definitive[s.id] {
+			for ancestor := s.parent; ancestor != nil; ancestor = ancestor.parent {
+				if end, ok := succeeded[ancestor.id]; ok && !end.Before(ends[s.id]) {
+					return true
+				}
+			}
+			return false
+		}
+		ancestor, ok := nearestFailed[s.id]
+		if !ok {
+			return false // the exemption: its own dial did not fail
+		}
+		return recoveredOf(ancestor) // the definitive failure follows its dial
 	}
 	for _, s := range stages {
 		if !failed[s.id] {
 			continue
 		}
-		if definitive[s.id] && !dialFailedAbove[s.id] {
-			continue
-		}
-		for ancestor := s.parent; ancestor != nil; ancestor = ancestor.parent {
-			if end, ok := succeeded[ancestor.id]; ok && !end.Before(ends[s.id]) {
-				delete(failed, s.id)
-				break
-			}
+		if recoveredOf(s) {
+			delete(failed, s.id)
 		}
 	}
 	if len(failed) == 0 {

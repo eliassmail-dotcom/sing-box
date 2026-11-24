@@ -360,6 +360,25 @@ func TestRootCauseDefinitiveRecoveredWithDial(t *testing.T) {
 	}
 }
 
+// The nested case: a definitive refusal under an OK transport inside a FAILED
+// outer dial. The transport's OK is not a recovery — it sits below the failed
+// ancestor — and the refusal stays the root cause (SPEC 139 §5.2).
+func TestRootCauseDefinitiveNestedUnderFailedDial(t *testing.T) {
+	trace := New(Options{})
+	ctx := With(context.Background(), trace)
+	outerCtx, outer := Begin(ctx, "dial", "node")
+	transportCtx, transport := Begin(outerCtx, "transport", "xhttp")
+	_, response := Begin(transportCtx, "transport_response", "xhttp")
+	response.Definitive()
+	response.End(errors.New("status 403")) // ends first
+	transport.End(nil)                     // then the transport returns OK
+	outer.End(errors.New("dial failed"))   // then the outer dial fails
+	summary := trace.Finish(nil)
+	if summary.RootCause != response.ID() {
+		t.Fatalf("root = %d, want the nested definitive refusal %d", summary.RootCause, response.ID())
+	}
+}
+
 func TestFinishClosesRunningStages(t *testing.T) {
 	trace := New(Options{})
 	ctx := With(context.Background(), trace)
