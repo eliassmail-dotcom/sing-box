@@ -1,0 +1,4 @@
+# lx:build-parity — shell scripts must stay LF so git-bash / CI can execute
+# them directly on Windows checkouts (core.autocrlf=true otherwise smudges
+# CRLF and bash fails with '\r' syntax errors).
+*.sh text eol=lf
