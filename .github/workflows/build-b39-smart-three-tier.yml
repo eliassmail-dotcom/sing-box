@@ -39,8 +39,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin fix/b39-smart-three-tier
-          git -C clients/apple checkout --detach 9a242b5d2a63e2cc69f61ad582ed5e9211f4a022
-          test "$(git -C clients/apple rev-parse HEAD)" = "9a242b5d2a63e2cc69f61ad582ed5e9211f4a022"
+          git -C clients/apple checkout --detach 5b0da9ed4f80aa76e723d24ea890553880443923
+          test "$(git -C clients/apple rev-parse HEAD)" = "5b0da9ed4f80aa76e723d24ea890553880443923"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
