@@ -11,20 +11,20 @@ import (
 )
 
 const (
-	lxFragmentModeTTL = 10 * time.Minute
-	lxFragmentModeLimit = 128
+	lxFragmentModeTTL        = 10 * time.Minute
+	lxFragmentModeLimit      = 128
 	lxFragmentMinRetryBudget = 300 * time.Millisecond
 )
 
 type lxFragmentModeEntry struct {
 	fragmented bool
-	expiry time.Time
+	expiry     time.Time
 }
 
 type lxFragmentObservation struct {
-	key netip.AddrPort
-	cached *lxFragmentModeEntry
-	used bool
+	key        netip.AddrPort
+	cached     *lxFragmentModeEntry
+	used       bool
 	invalidate bool
 }
 
@@ -32,9 +32,16 @@ func hasMultipleDistinctIPsLx(addresses []netip.Addr) bool {
 	var first netip.Addr
 	for _, ip := range addresses {
 		ip = ip.Unmap()
-		if !ip.IsValid() { continue }
-		if !first.IsValid() { first = ip; continue }
-		if ip != first { return true }
+		if !ip.IsValid() {
+			continue
+		}
+		if !first.IsValid() {
+			first = ip
+			continue
+		}
+		if ip != first {
+			return true
+		}
 	}
 	return false
 }
@@ -42,7 +49,9 @@ func hasMultipleDistinctIPsLx(addresses []netip.Addr) bool {
 func (r *lxIPRace) loadFragmentMode(generation uint64, key netip.AddrPort) *lxFragmentModeEntry {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if generation != r.generation { return nil }
+	if generation != r.generation {
+		return nil
+	}
 	entry := r.fragmentModes[key]
 	if entry != nil && !time.Now().Before(entry.expiry) {
 		delete(r.fragmentModes, key)
@@ -53,16 +62,22 @@ func (r *lxIPRace) loadFragmentMode(generation uint64, key netip.AddrPort) *lxFr
 
 // Caller holds the epoch-checked winner lock.
 func (r *lxIPRace) storeFragmentModeLocked(key netip.AddrPort, fragmented bool) {
-	if r.fragmentModes == nil { r.fragmentModes = make(map[netip.AddrPort]*lxFragmentModeEntry) }
+	if r.fragmentModes == nil {
+		r.fragmentModes = make(map[netip.AddrPort]*lxFragmentModeEntry)
+	}
 	now := time.Now()
 	for ip, entry := range r.fragmentModes {
-		if !now.Before(entry.expiry) { delete(r.fragmentModes, ip) }
+		if !now.Before(entry.expiry) {
+			delete(r.fragmentModes, ip)
+		}
 	}
 	if len(r.fragmentModes) >= lxFragmentModeLimit && r.fragmentModes[key] == nil {
 		var oldestKey netip.AddrPort
 		var oldest time.Time
 		for ip, entry := range r.fragmentModes {
-			if oldest.IsZero() || entry.expiry.Before(oldest) { oldestKey, oldest = ip, entry.expiry }
+			if oldest.IsZero() || entry.expiry.Before(oldest) {
+				oldestKey, oldest = ip, entry.expiry
+			}
 		}
 		delete(r.fragmentModes, oldestKey)
 	}
@@ -70,7 +85,9 @@ func (r *lxIPRace) storeFragmentModeLocked(key netip.AddrPort, fragmented bool) 
 }
 
 func (r *lxIPRace) invalidateFragmentMode(generation uint64, observed *lxFragmentObservation) {
-	if observed == nil || !observed.invalidate || observed.cached == nil { return }
+	if observed == nil || !observed.invalidate || observed.cached == nil {
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if generation == r.generation && r.fragmentModes[observed.key] == observed.cached {
@@ -113,7 +130,9 @@ func dialAdaptiveFragmentCandidateLx(
 			observed.used = fragmented
 			return conn, nil, observed
 		}
-		if ctx.Err() != nil { return nil, ctx.Err(), nil }
+		if ctx.Err() != nil {
+			return nil, ctx.Err(), nil
+		}
 		// Failure of a retained mode is evidence only for an actual handshake
 		// failure or definitive socket refusal, not a canceled/slow TCP dial.
 		if verifiedFailure || shouldRecordIPFailureLx(err, true) {

@@ -127,10 +127,11 @@ func applyDetourFragmentDefault(options *ClientOptions) {
 	if !options.DialedThroughDetour {
 		return
 	}
-	if options.Options.Fragment || options.Options.RecordFragment {
+	if options.Options.FinalMaskFragment != nil || options.Options.Fragment || options.Options.RecordFragment != nil {
 		return // user made a choice; do not second-guess it
 	}
-	options.Options.RecordFragment = true
+	recordFragment := true
+	options.Options.RecordFragment = &recordFragment
 }
 
 func NewClientWithOptions(options ClientOptions) (Config, error) {
@@ -139,6 +140,9 @@ func NewClientWithOptions(options ClientOptions) (Config, error) {
 	}
 	// lx: SPEC 060 — before any engine sees the options, so REALITY and uTLS
 	// clients get the same default as the standard one.
+	if options.Options.FinalMaskFragment != nil && options.Options.Engine != "" && options.Options.Engine != C.TLSEngineGo {
+		return nil, E.New("finalmask_fragment requires Go TLS engine")
+	}
 	applyDetourFragmentDefault(&options)
 	if !options.KTLSCompatible {
 		if options.Options.KernelTx {
@@ -167,6 +171,7 @@ func NewClientWithOptions(options ClientOptions) (Config, error) {
 
 func ClientHandshake(ctx context.Context, conn net.Conn, config Config) (Conn, error) {
 	ctx, stage := beginHandshakeLx(ctx, config) // lx: SPEC 139
+	conn = sniffGuardConnLx(ctx, conn, config)  // LX35
 	tlsConn, err := aTLS.ClientHandshake(ctx, conn, config)
 	endHandshakeLx(ctx, stage, tlsConn, err) // lx: SPEC 139
 	if err != nil {
@@ -187,8 +192,8 @@ type Dialer interface {
 }
 
 type defaultDialer struct {
-	dialer N.Dialer
-	config Config
+	dialer                 N.Dialer
+	config                 Config
 	adaptiveRecordFragment bool
 }
 
@@ -238,6 +243,7 @@ func (d *defaultDialer) dialContext(ctx context.Context, destination M.Socksaddr
 					applyAdaptiveFragmentModeLx(attemptCtx, config)
 				}
 				handshakeCtx, stage := beginHandshakeLx(attemptCtx, config)
+				raw = sniffGuardConnLx(handshakeCtx, raw, config) // LX35
 				tlsConn, err := aTLS.ClientHandshake(handshakeCtx, raw, config)
 				endHandshakeLx(handshakeCtx, stage, tlsConn, err)
 				if err != nil {
@@ -273,6 +279,7 @@ func (d *defaultDialer) dialContext(ctx context.Context, destination M.Socksaddr
 	// helpers wrap it so tls.NewDialer users (VLESS, Trojan, VMess, WS, gRPC, DoT/DoH)
 	// record the `tls` stage too, not only callers of tls.ClientHandshake.
 	handshakeCtx, stage := beginHandshakeLx(ctx, d.config)
+	conn = sniffGuardConnLx(handshakeCtx, conn, d.config) // LX35
 	tlsConn, err := aTLS.ClientHandshake(handshakeCtx, conn, d.config)
 	endHandshakeLx(handshakeCtx, stage, tlsConn, err)
 	// lx:end SPEC 139

@@ -19,25 +19,27 @@ type warmupTestLeaf struct {
 	run func(context.Context) error
 }
 
-func (n *warmupTestLeaf) Tag() string { return n.tag }
-func (n *warmupTestLeaf) Type() string { return C.TypeVLESS }
+func (n *warmupTestLeaf) Tag() string            { return n.tag }
+func (n *warmupTestLeaf) Type() string           { return C.TypeVLESS }
 func (n *warmupTestLeaf) IPWarmupEligible() bool { return true }
 func (n *warmupTestLeaf) WarmAuthenticatedIP(ctx context.Context) error {
-	if n.run == nil { return nil }
+	if n.run == nil {
+		return nil
+	}
 	return n.run(ctx)
 }
 
 type warmupTestGroup struct {
 	adapter.OutboundGroup
 	tag, kind string
-	selected adapter.Outbound
-	all []string
+	selected  adapter.Outbound
+	all       []string
 }
 
-func (g *warmupTestGroup) Tag() string { return g.tag }
-func (g *warmupTestGroup) Type() string { return g.kind }
+func (g *warmupTestGroup) Tag() string                      { return g.tag }
+func (g *warmupTestGroup) Type() string                     { return g.kind }
 func (g *warmupTestGroup) Selected(string) adapter.Outbound { return g.selected }
-func (g *warmupTestGroup) All() []string { return g.all }
+func (g *warmupTestGroup) All() []string                    { return g.all }
 
 type warmupTestManager struct {
 	adapter.OutboundManager
@@ -45,10 +47,12 @@ type warmupTestManager struct {
 }
 
 func (m *warmupTestManager) Outbounds() []adapter.Outbound { return m.nodes }
-func (m *warmupTestManager) Default() adapter.Outbound { return nil }
+func (m *warmupTestManager) Default() adapter.Outbound     { return nil }
 func (m *warmupTestManager) Outbound(tag string) (adapter.Outbound, bool) {
 	for _, node := range m.nodes {
-		if node.Tag() == tag { return node, true }
+		if node.Tag() == tag {
+			return node, true
+		}
 	}
 	return nil, false
 }
@@ -87,10 +91,14 @@ func TestLXIPWarmupPriorityAndQueueLimit(t *testing.T) {
 	}
 	seen := make(map[string]bool)
 	for _, node := range plan {
-		if seen[node.Tag()] { t.Fatal("duplicate warmup target") }
+		if seen[node.Tag()] {
+			t.Fatal("duplicate warmup target")
+		}
 		seen[node.Tag()] = true
 	}
-	if seen["leaf-0"] { t.Fatal("recent node displaced a selected reachable group") }
+	if seen["leaf-0"] {
+		t.Fatal("recent node displaced a selected reachable group")
+	}
 }
 
 func TestLXIPWarmupStartupAndFreshness(t *testing.T) {
@@ -106,13 +114,18 @@ func TestLXIPWarmupStartupAndFreshness(t *testing.T) {
 	defer finishPlan()
 	c.Start(m, func() map[string]bool { return reachable })
 	select {
-	case <-c.done: t.Fatal("startup barrier was bypassed")
+	case <-c.done:
+		t.Fatal("startup barrier was bypassed")
 	case <-time.After(30 * time.Millisecond):
 	}
-	if ran.Load() != 0 { t.Fatal("warmup ran while startup URLTest pending") }
+	if ran.Load() != 0 {
+		t.Fatal("warmup ran while startup URLTest pending")
+	}
 	finishStartup()
 	waitWarmupDone(t, c)
-	if ran.Load() != 1 { t.Fatalf("fresh or planned URLTest duplicated: %d calls", ran.Load()) }
+	if ran.Load() != 1 {
+		t.Fatalf("fresh or planned URLTest duplicated: %d calls", ran.Load())
+	}
 }
 
 func TestLXIPWarmupWorkerCapAndNetworkCancellation(t *testing.T) {
@@ -123,11 +136,12 @@ func TestLXIPWarmupWorkerCapAndNetworkCancellation(t *testing.T) {
 	ready := make(chan struct{}, 8)
 	release := make(chan struct{})
 	var releaseOnce sync.Once
-	defer releaseOnce.Do(func(){ close(release) })
+	defer releaseOnce.Do(func() { close(release) })
 	m, reachable := warmupTestGraph(8, func(ctx context.Context) error {
 		n := active.Add(1)
 		defer active.Add(-1)
-		for old := peak.Load(); n > old && !peak.CompareAndSwap(old, n); old = peak.Load() {}
+		for old := peak.Load(); n > old && !peak.CompareAndSwap(old, n); old = peak.Load() {
+		}
 		started.Add(1)
 		ready <- struct{}{}
 		<-ctx.Done()
@@ -136,14 +150,19 @@ func TestLXIPWarmupWorkerCapAndNetworkCancellation(t *testing.T) {
 	})
 	c.Start(m, func() map[string]bool { return reachable })
 	for i := 0; i < 2; i++ {
-		select { case <-ready: case <-time.After(time.Second): t.Fatal("worker did not start") }
+		select {
+		case <-ready:
+		case <-time.After(time.Second):
+			t.Fatal("worker did not start")
+		}
 	}
 	c.NetworkChanged()
 	select {
-	case <-c.done: t.Fatal("released workers before cleanup")
+	case <-c.done:
+		t.Fatal("released workers before cleanup")
 	case <-time.After(30 * time.Millisecond):
 	}
-	releaseOnce.Do(func(){ close(release) })
+	releaseOnce.Do(func() { close(release) })
 	waitWarmupDone(t, c)
 	if started.Load() != 2 || peak.Load() != 2 || active.Load() != 0 {
 		t.Fatalf("invalid cap/cancellation: started=%d peak=%d active=%d", started.Load(), peak.Load(), active.Load())
@@ -162,10 +181,18 @@ func TestLXIPWarmupForegroundNeverWaitsAndCancelsDuplicate(t *testing.T) {
 		return ctx.Err()
 	})
 	c.Start(m, func() map[string]bool { return reachable })
-	select { case <-ready: case <-time.After(time.Second): t.Fatal("worker did not start") }
+	select {
+	case <-ready:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not start")
+	}
 	finish := c.BeginUse("leaf-0")
 	defer finish()
-	select { case <-cancelled: case <-time.After(time.Second): t.Fatal("foreground did not cancel duplicate") }
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("foreground did not cancel duplicate")
+	}
 	waitWarmupDone(t, c)
 }
 
@@ -182,9 +209,15 @@ func TestLXIPWarmupSelectionChangeStopsQueuedWork(t *testing.T) {
 	})
 	c.Start(m, func() map[string]bool { return reachable })
 	for i := 0; i < 2; i++ {
-		select { case <-ready: case <-time.After(time.Second): t.Fatal("worker did not start") }
+		select {
+		case <-ready:
+		case <-time.After(time.Second):
+			t.Fatal("worker did not start")
+		}
 	}
 	c.SelectionChanged()
 	waitWarmupDone(t, c)
-	if started.Load() != 2 { t.Fatalf("stale selection scheduled more work: %d", started.Load()) }
+	if started.Load() != 2 {
+		t.Fatalf("stale selection scheduled more work: %d", started.Load())
+	}
 }
