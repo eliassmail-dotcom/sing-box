@@ -21,7 +21,7 @@ func (d *DefaultDialer) dialParallelInterface(ctx context.Context, dialer net.Di
 	}
 	if isAuthenticatedIPWarmup(ctx) && len(primaryInterfaces)+len(fallbackInterfaces) != 1 {
 		// Background budget counts candidate TCP sockets; no nested fanout.
-		return nil, ErrAuthenticatedIPWarmupComplete
+		return nil, false, ErrAuthenticatedIPWarmupComplete
 	}
 	defaultInterface := d.networkManager.InterfaceMonitor().DefaultInterface()
 	if len(primaryInterfaces)+len(fallbackInterfaces) == 1 {
@@ -120,7 +120,7 @@ func (d *DefaultDialer) dialParallelInterfaceFastFallback(ctx context.Context, d
 	}
 	if isAuthenticatedIPWarmup(ctx) && len(primaryInterfaces)+len(fallbackInterfaces) != 1 {
 		// Background budget counts candidate TCP sockets; no nested fanout.
-		return nil, ErrAuthenticatedIPWarmupComplete
+		return nil, false, ErrAuthenticatedIPWarmupComplete
 	}
 	defaultInterface := d.networkManager.InterfaceMonitor().DefaultInterface()
 	if len(primaryInterfaces)+len(fallbackInterfaces) == 1 {

@@ -10,6 +10,12 @@ F2 f4e91b653: GLM reports GO; local go vet, dialer race tests, TLS tests passed.
 
 F1: one-shot warmup only on iOS after the initial URLTest startup barrier; pending/in-flight URLTest and foreground attempts suppress or cancel it. Fresh successful URLTest TTL 10m; fresh authenticated winner must still be present in current DNS answer. Queue <=8, workers <=2, candidate TCP races <=3/worker. No nested multi-interface fanout in optional warmup. Close winning stream immediately and hold worker until losers close. No VLESS payload, no fake URLTest history, no persistence. If network or selection changes during the wave, abandon it rather than schedule another sweep.
 
+F1 review (abfac6ce5): GLM conditional GO pending B1 compile correction (both nested interface race return paths must return conn, primary bool, error). With that correction applied locally, GLM reports go build ./... OK; dialer/urltest/group/route/TLS race tests PASS; VLESS tests without -race PASS. These are reviewer-reported results, not a developer-side test run.
+- W1: the first network change after sealing ends the one-shot coordinator for this Box lifetime; regular URLTest remains responsible for subsequent networks.
+- W2: strictFailures denotes the adaptive authenticated REALITY path at the winner recording call; a plain TCP winner must never set winnerAuthenticated.
+- W3: a retained URLTest history entry younger than 10 minutes suppresses optional warmup regardless of its result. The standard failed group probe deletes history, so a failed probe with no retained entry does not by itself suppress warmup; pending/in-flight plans still suppress it. Do not interpret warmup as an automatic retry of every failed URLTest.
+- Known baseline QA issue: GLM reproduced protocol/vless/encryption -race checkptr failure in sing-vmess NewVisionConn on both c211f522 and F1 with B1 fixed. Record separately from F1/F2; run the encryption tests without -race as well and preserve the race failure in the QA report. Do not disable checkptr globally or claim the entire suite passes.
+
 QA before release GO (unit tests only; no IPA build):
 - go vet ./common/dialer/ ./common/urltest/ ./protocol/vless/ ./common/tls/ ./protocol/group/ ./route/
 - go test -race -count=1 -ldflags '-checklinkname=0' ./common/dialer/ ./common/urltest/ ./protocol/vless/ ./common/tls/ ./protocol/group/

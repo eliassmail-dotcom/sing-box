@@ -281,6 +281,8 @@ func (r *lxIPRace) dialAtGeneration(
 					_ = outcome.conn.Close()
 					return nil, ctx.Err()
 				}
+				// strictFailures is enabled only for the adaptive authenticated
+				// REALITY path; plain TCP success must not mark an authenticated winner.
 				r.recordRaceWinner(generation, outcome.addr, outcome.latency, strictFailures)
 				if isAuthenticatedIPWarmup(ctx) {
 					// Close the verified winner before waiting for slower losers.
