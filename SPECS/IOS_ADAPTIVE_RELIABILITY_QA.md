@@ -48,3 +48,5 @@ Regression matrix (host QA is not device validation):
 | iOS start | early RPC guard, shutdown, libbox command socket path tests; no changes to Swift in F1–F3 | Signed installed IPA start, network transitions, memory and widget smoke tests |
 
 Actual Yandex-generated iOS configuration and Apple-only Swift tests must be checked separately; host Go green does not certify routing policies or Network Extension startup. No production credentials or subscription URLs should be printed in CI.
+
+First integration run 45386405829: actual prepare-b38 and all source guards PASS (LX35 f1bac271853eaf13398ce1030c948aebc3aed2e1); push rejected because upstream changed workflow files and GITHUB_TOKEN lacks workflows permission. Tests skipped in this run. The revised QA publishes a source-identical review snapshot with .github/workflows preserved from the source branch, while retaining the exact prepared merge in a Git bundle artifact and testing the exact merge. The snapshot is not an alternate build pipeline. Verify source equivalence outside .github/workflows and record both commit SHAs. If branch push is rejected, the bundle remains the source of truth.

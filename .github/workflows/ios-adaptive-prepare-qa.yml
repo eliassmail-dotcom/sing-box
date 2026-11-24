@@ -56,8 +56,32 @@ jobs:
           git -c user.name="iOS QA" -c user.email="github-actions@users.noreply.github.com" commit -m "qa(ios): prepare F1-F3 source with LX35 and FinalMask" -m "Source: $source_sha; upstream: $upstream_sha. Prepared tree; no release."
           git merge-base --is-ancestor "$source_sha" HEAD
           git merge-base --is-ancestor "$upstream_sha" HEAD
-          git push origin HEAD:refs/heads/qa/ios-adaptive-prepared-758a0f37
-          printf 'Prepared commit: %s\nSource: %s\nLX35: %s\n' "$(git rev-parse HEAD)" "$source_sha" "$upstream_sha" | tee -a "$GITHUB_STEP_SUMMARY"
+          prepared_sha=$(git rev-parse HEAD)
+          mkdir -p /tmp/ios-prepared-review
+          git bundle create /tmp/ios-prepared-review/prepared.bundle HEAD "^$source_sha"
+          git bundle verify /tmp/ios-prepared-review/prepared.bundle
+          printf 'Prepared merge: %s\nSource: %s\nLX35: %s\n' "$prepared_sha" "$source_sha" "$upstream_sha" | tee /tmp/ios-prepared-review/provenance.txt -a "$GITHUB_STEP_SUMMARY"
+          # GITHUB_TOKEN cannot update workflow files. Preserve them from
+          # the source branch in the published review snapshot, not in the
+          # actual merge (which is retained in the bundle and tested below).
+          git restore --source="$source_sha" --staged --worktree -- .github/workflows/
+          snapshot_tree=$(git write-tree)
+          snapshot_sha=$(git -c user.name="iOS QA" -c user.email="github-actions@users.noreply.github.com" commit-tree "$snapshot_tree" -p "$source_sha" -m "qa(ios): prepared F1-F3 source snapshot (workflows unchanged)" -m "Exact prepared merge: $prepared_sha; LX35: $upstream_sha. Only .github/workflows differs from the exact tested merge. See bundle.")
+          git diff --exit-code "$source_sha" "$snapshot_sha" -- .github/workflows/
+          git diff --exit-code "$prepared_sha" "$snapshot_sha" -- . ':(exclude).github/workflows/**'
+          git reset --hard "$prepared_sha"
+          if git push origin "$snapshot_sha":refs/heads/qa/ios-adaptive-prepared-758a0f37; then
+            printf 'Published review snapshot: %s\n' "$snapshot_sha" | tee -a /tmp/ios-prepared-review/provenance.txt "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Snapshot push refused; exact prepared merge remains available as a Git bundle.' | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Retain exact prepared Git commit for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-adaptive-prepared-source
+          path: /tmp/ios-prepared-review/
+          if-no-files-found: error
+          retention-days: 14
       - name: Compile prepared host source
         run: |
           go build -ldflags '-checklinkname=0' ./...
