@@ -55,4 +55,4 @@ grep -q 'with_lx_chain' .github/workflows/build-ipa-lx.yml || true
 echo "$UPSTREAM_SHA" > /tmp/lx35-upstream-sha
 
 python3 .github/patch-b38-finalmask.py
-gofmt -w option/tls.go option/lx_finalmask_fragment.go common/tls/{client,utls_client,std_client,lx_finalmask_conn,lx_finalmask_conn_test,lx_finalmask_reality_test}.go
+if command -v gofmt >/dev/null 2>&1; then gofmt -w option/tls.go option/lx_finalmask_fragment.go common/tls/{client,utls_client,std_client,lx_finalmask_conn,lx_finalmask_conn_test,lx_finalmask_reality_test}.go; fi
