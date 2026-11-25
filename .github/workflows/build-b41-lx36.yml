@@ -47,10 +47,42 @@ jobs:
           git diff --binary --full-index "$OLD" "$NEW" -- . ':(exclude).github/workflows/**' > /tmp/b41-lx36.patch
           test -s /tmp/b41-lx36.patch
           if ! git apply --3way --index /tmp/b41-lx36.patch; then
-            git status --short
-            git diff --name-only --diff-filter=U
-            git diff --cc
-            exit 1
+            # Only the three reviewed TLS conflicts are allowed. Preserve our
+            # verified race, detour fragmentation and FinalMask validation
+            # while adopting LX.36 resolver-aware TLS constructor signatures.
+            test "$(git diff --name-only --diff-filter=U | LC_ALL=C sort)" = "$(printf '%s\n' common/tls/client.go common/tls/std_client.go common/tls/utls_client.go)"
+            python3 - <<'PY'
+          from pathlib import Path
+          import re
+          pattern = re.compile(r"^<<<<<<< ours\n(.*?)^=======\n(.*?)^>>>>>>> theirs\n", re.M | re.S)
+          p = Path("common/tls/client.go")
+          text = p.read_text()
+          matches = list(pattern.finditer(text))
+          assert len(matches) == 2
+          def resolve_client(m):
+              ours, theirs = m.groups()
+              if "func NewDialerFromClientOptions(" in ours:
+                  assert "func NewDialerFromOptions(dialer N.Dialer, options ClientOptions)" in theirs
+                  return ("// Preserve the LX++ helper used by detour-aware callers.\n"
+                          "func NewDialerFromClientOptions(dialer N.Dialer, options ClientOptions) (N.Dialer, error) {\n"
+                          "\treturn NewDialerFromOptions(dialer, options)\n}\n\n" + theirs)
+              assert "DialedThroughDetour bool" in ours
+              assert "DomainResolver" in theirs and "DirectResolver" in theirs
+              return theirs + ours
+          p.write_text(pattern.sub(resolve_client, text))
+          for filename, signature in [("std_client.go", "newSTDClient"), ("utls_client.go", "newUTLSClient")]:
+              p = Path("common/tls") / filename
+              text = p.read_text()
+              assert len(list(pattern.finditer(text))) == 1
+              def resolve(m):
+                  ours, theirs = m.groups()
+                  assert ("func " + signature + "(") in ours and ("func " + signature + "(") in theirs
+                  assert "domainResolver *option.DomainResolveOptions, directResolver bool" in theirs
+                  assert "options.FinalMaskFragment.Validate()" in ours
+                  return theirs + ours.split("\n", 1)[1]
+              p.write_text(pattern.sub(resolve, text))
+          PY
+            git add common/tls/client.go common/tls/std_client.go common/tls/utls_client.go
           fi
           test -z "$(git ls-files -u)"
           git diff --cached --stat
@@ -69,9 +101,9 @@ jobs:
         run: |-
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
-          git -C clients/apple fetch --no-tags origin fix/b39-smart-three-tier
-          git -C clients/apple checkout --detach df5c02ca040994dca6d40884789c65bc384badf1
-          test "$(git -C clients/apple rev-parse HEAD)" = "df5c02ca040994dca6d40884789c65bc384badf1"
+          git -C clients/apple fetch --no-tags origin fix/b41-lx36-wg-idle
+          git -C clients/apple checkout --detach 631f27f6a303ad8238fdbb35b2e631e422952f56
+          test "$(git -C clients/apple rev-parse HEAD)" = "631f27f6a303ad8238fdbb35b2e631e422952f56"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
           for dep in utls wireguard-go sing-tun gvisor; do
