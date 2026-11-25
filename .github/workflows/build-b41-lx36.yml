@@ -14,7 +14,7 @@ permissions:
 # a manual dispatch on the default branch cancelling feature-branch builds.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -102,8 +102,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin fix/b41-lx36-wg-idle
-          git -C clients/apple checkout --detach 631f27f6a303ad8238fdbb35b2e631e422952f56
-          test "$(git -C clients/apple rev-parse HEAD)" = "631f27f6a303ad8238fdbb35b2e631e422952f56"
+          git -C clients/apple checkout --detach ad85702c1980352f2b67187516a89d65da96b354
+          test "$(git -C clients/apple rev-parse HEAD)" = "ad85702c1980352f2b67187516a89d65da96b354"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
           for dep in utls wireguard-go sing-tun gvisor; do
