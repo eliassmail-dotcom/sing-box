@@ -118,10 +118,10 @@ func (c *STDClientConfig) SetECHConfigList(EncryptedClientHelloConfigList []byte
 }
 
 func NewSTDClient(ctx context.Context, logger logger.ContextLogger, serverAddress string, options option.OutboundTLSOptions) (Config, error) {
-	return newSTDClient(ctx, logger, serverAddress, options, false)
+	return newSTDClient(ctx, logger, serverAddress, options, false, nil, false)
 }
 
-func newSTDClient(ctx context.Context, logger logger.ContextLogger, serverAddress string, options option.OutboundTLSOptions, allowEmptyServerName bool) (Config, error) {
+func newSTDClient(ctx context.Context, logger logger.ContextLogger, serverAddress string, options option.OutboundTLSOptions, allowEmptyServerName bool, domainResolver *option.DomainResolveOptions, directResolver bool) (Config, error) {
 	if err := options.FinalMaskFragment.Validate(); err != nil {
 		return nil, err
 	}
@@ -258,7 +258,7 @@ func newSTDClient(ctx context.Context, logger logger.ContextLogger, serverAddres
 	config.SetServerName(serverName)
 	if options.ECH != nil && options.ECH.Enabled {
 		var err error
-		config, err = parseECHClientConfig(ctx, config.(ECHCapableConfig), options)
+		config, err = parseECHClientConfig(ctx, config.(ECHCapableConfig), options, domainResolver, directResolver)
 		if err != nil {
 			return nil, err
 		}
