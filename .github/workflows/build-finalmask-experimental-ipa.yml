@@ -139,6 +139,20 @@ jobs:
         shell: bash
         run: |
           go build -ldflags '-checklinkname=0' -tags "$APPLE_TAGS" ./...
+      # Darwin's default UDP maxdgram can be smaller than the Sudoku wire
+      # bound (18433 bytes). Exercise the actual oversized-datagram rejection
+      # over loopback, rather than skipping or shrinking the protocol test.
+      # This is a CI host setting only, not an iOS device capability claim.
+      - name: Provision Darwin UDP loopback test capacity
+        shell: bash
+        run: |
+          current="$(sysctl -n net.inet.udp.maxdgram)"
+          if [ "$current" -lt 18443 ]; then
+            sudo sysctl -w net.inet.udp.maxdgram=32768
+          fi
+          test "$(sysctl -n net.inet.udp.maxdgram)" -ge 18443
+          echo "Darwin UDP maxdgram for protocol tests: $(sysctl -n net.inet.udp.maxdgram); device UDP limits not validated" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Full Apple tags regression race tests
         shell: bash
         run: |
