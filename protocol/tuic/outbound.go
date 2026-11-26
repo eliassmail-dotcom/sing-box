@@ -48,7 +48,13 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	if options.TLS == nil || !options.TLS.Enabled {
 		return nil, C.ErrTLSRequired
 	}
-	tlsConfig, err := tls.NewClient(ctx, logger, options.Server, common.PtrValueOrDefault(options.TLS))
+	tlsConfig, err := tls.NewClientWithOptions(tls.ClientOptions{
+		Context:        ctx,
+		Logger:         logger,
+		ServerAddress:  options.Server,
+		Options:        common.PtrValueOrDefault(options.TLS),
+		DomainResolver: options.DomainResolver,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +83,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	}
 	client, err := tuic.NewClient(tuic.ClientOptions{
 		Context:       ctx,
-		Dialer:        lxdatagram.Dialer(ctx, C.TypeTUIC, outboundDialer, logger), // lx: SPEC 150, 151
+		Dialer:        lxdatagram.Dialer(ctx, tag, outboundDialer, logger), // lx: SPEC 150, 060
 		ServerAddress: options.ServerOptions.Build(),
 		TLSConfig:     tlsConfig,
 		QUICOptions: qtls.QUICOptions{

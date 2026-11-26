@@ -81,6 +81,12 @@ func (r *Router) reachability() (map[string]bool, map[string]selectionRefs) {
 
 // computeReachable runs the actual walk from the seeds (final + rule targets +
 // DNS-server detours).
+// IPWarmupReachableTags uses the actual routing graph even when idle suspend
+// is disabled. The speculative scheduler must never assume all tags are active.
+func (r *Router) IPWarmupReachableTags() map[string]bool {
+	return r.computeReachable()
+}
+
 func (r *Router) computeReachable() map[string]bool {
 	return r.computeReachability().reachable
 }
@@ -112,7 +118,7 @@ func (r *Router) computeReachability() reachability {
 
 // SelectionRefs implements adapter.ReachabilityReporter (SPEC 097): the
 // incoming edges into tag from the cached walk. Computed whether or not the
-// idle tick runs — lx.wg.build_max works without lx.wg.idle_suspend; the event
+// idle tick runs — lx.wg.idle.build_max works without lx.wg.idle.suspend; the event
 // points invalidate the cache either way.
 func (r *Router) SelectionRefs(tag string) (manual int, auto int) {
 	_, refs := r.reachability()
@@ -238,15 +244,15 @@ func walkReachable(tag string, manual bool, result *reachability, resolve func(t
 func (r *Router) startIdleSuspend() error {
 	if r.idleSuspend <= 0 {
 		if r.idleSuspendReachable > 0 {
-			return E.New("lx.wg.idle_suspend_reachable requires lx.wg.idle_suspend")
+			return E.New("lx.wg.idle.suspend_reachable requires lx.wg.idle.suspend")
 		}
 		if r.idleTeardownSet {
-			return E.New("lx.wg.idle_teardown requires lx.wg.idle_suspend")
+			return E.New("lx.wg.idle.teardown requires lx.wg.idle.suspend")
 		}
 		return nil
 	}
 	if r.idleSuspendReachable > 0 && r.idleSuspendReachable < r.idleSuspend {
-		return E.New("lx.wg.idle_suspend_reachable must be >= lx.wg.idle_suspend")
+		return E.New("lx.wg.idle.suspend_reachable must be >= lx.wg.idle.suspend")
 	}
 	r.idleStop = make(chan struct{})
 	period := r.idleSuspend / idleTickDivisor

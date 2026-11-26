@@ -5,16 +5,17 @@ import (
 	"context"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/service"
 )
 
 // lxWG returns the resolved lx.wg values from the box context (SPEC 098), or
-// all-off when the context carries none (tests, a router built outside
+// the defaults when the context carries none (tests, a router built outside
 // box.New) or is nil.
 func lxWG(ctx context.Context) option.LXWGResolved {
 	if ctx == nil {
-		return option.LXWGResolved{}
+		return (*option.LXResolved)(nil).WGOrZero()
 	}
 	return service.PtrFromContext[option.LXResolved](ctx).WGOrZero()
 }
@@ -40,6 +41,11 @@ type selectionRefs struct {
 // this is a harmless flag store.
 func (r *Router) InvalidateReachability() {
 	r.reachDirty.Store(true)
+	if r.ctx != nil {
+		if warmup := service.PtrFromContext[urltest.IPWarmupCoordinator](r.ctx); warmup != nil {
+			warmup.SelectionChanged()
+		}
+	}
 }
 
 // QuiesceForShutdown prepares the router for a fast box shutdown (SPEC 030),

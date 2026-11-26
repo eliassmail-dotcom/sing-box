@@ -32,11 +32,14 @@ const (
 // lxIPRace is owned by one outbound's resolve dialer, not shared across
 // different VPN endpoints. It is safe for concurrent URLTest/application dials.
 type lxIPRace struct {
-	mu           sync.Mutex
-	winner       netip.Addr
-	winnerRTT    time.Duration
-	winnerExpiry time.Time
-	failed       map[netip.AddrPort]time.Time
+	mu                  sync.Mutex
+	generation          uint64
+	winner              netip.Addr
+	winnerAuthenticated bool
+	winnerRTT           time.Duration
+	winnerExpiry        time.Time
+	failed              map[netip.AddrPort]time.Time
+	fragmentModes       map[netip.AddrPort]*lxFragmentModeEntry
 }
 
 func newLXIPRace() *lxIPRace {
@@ -48,17 +51,21 @@ func newLXIPRace() *lxIPRace {
 func (r *lxIPRace) resetHistory() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.generation++
 	r.winner = netip.Addr{}
+	r.winnerAuthenticated = false
 	r.winnerRTT = 0
 	r.winnerExpiry = time.Time{}
 	clear(r.failed)
+	clear(r.fragmentModes)
 }
 
 type lxIPRaceResult struct {
-	addr    netip.Addr
-	conn    net.Conn
-	err     error
-	latency time.Duration
+	addr     netip.Addr
+	conn     net.Conn
+	err      error
+	latency  time.Duration
+	fragment *lxFragmentObservation
 }
 
 func (r *lxIPRace) ordered(addresses []netip.Addr, port uint16, preferIPv6 bool) ([]netip.Addr, bool, time.Duration) {
@@ -67,6 +74,7 @@ func (r *lxIPRace) ordered(addresses []netip.Addr, port uint16, preferIPv6 bool)
 	now := time.Now()
 	if now.After(r.winnerExpiry) {
 		r.winner = netip.Addr{}
+		r.winnerAuthenticated = false
 		r.winnerRTT = 0
 	}
 	for ip, until := range r.failed {
@@ -122,12 +130,36 @@ func (r *lxIPRace) ordered(addresses []netip.Addr, port uint16, preferIPv6 bool)
 	return ordered, known, delay
 }
 
-func (r *lxIPRace) recordWinner(ip netip.Addr, measured time.Duration) {
+func (r *lxIPRace) currentGeneration() uint64 {
+	if r == nil {
+		return 0
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.generation
+}
+
+func (r *lxIPRace) recordWinner(generation uint64, ip netip.Addr, measured time.Duration) {
+	r.recordRaceWinner(generation, ip, measured, false)
+}
+
+func (r *lxIPRace) recordRaceWinner(generation uint64, ip netip.Addr, measured time.Duration, authenticated bool) {
+	r.recordRaceWinnerWithFragment(generation, ip, measured, authenticated, nil)
+}
+
+func (r *lxIPRace) recordRaceWinnerWithFragment(generation uint64, ip netip.Addr, measured time.Duration, authenticated bool, fragment *lxFragmentObservation) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if generation != r.generation {
+		return
+	}
 	if r.winner == ip && r.winnerRTT > 0 {
 		measured = r.winnerRTT + (measured-r.winnerRTT)/8
 	}
+	if authenticated && fragment != nil {
+		r.storeFragmentModeLocked(fragment.key, fragment.used)
+	}
+	r.winnerAuthenticated = authenticated
 	r.winner = ip
 	r.winnerRTT = measured
 	r.winnerExpiry = time.Now().Add(lxIPRaceWinnerTTL)
@@ -138,11 +170,15 @@ func (r *lxIPRace) recordWinner(ip netip.Addr, measured time.Duration) {
 	}
 }
 
-func (r *lxIPRace) recordFailure(ip netip.Addr, port uint16) {
+func (r *lxIPRace) recordFailure(generation uint64, ip netip.Addr, port uint16) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if generation != r.generation {
+		return
+	}
 	if r.winner == ip {
 		r.winner = netip.Addr{}
+		r.winnerAuthenticated = false
 		r.winnerRTT = 0
 		r.winnerExpiry = time.Time{}
 	}
@@ -165,15 +201,49 @@ func (r *lxIPRace) dial(
 	preferIPv6 bool,
 	dialOne func(context.Context, netip.Addr) (net.Conn, error),
 ) (net.Conn, error) {
+	return r.dialAtGeneration(ctx, destination, addresses, preferIPv6, r.currentGeneration(), false, dialOne)
+}
+
+// dialAtGeneration accepts an epoch captured before DNS lookup. A late old
+// network result may finish, but it cannot change current network history.
+func (r *lxIPRace) dialAtGeneration(
+	ctx context.Context,
+	destination M.Socksaddr,
+	addresses []netip.Addr,
+	preferIPv6 bool,
+	generation uint64,
+	strictFailures bool,
+	dialOne func(context.Context, netip.Addr) (net.Conn, error),
+) (net.Conn, error) {
+	return r.dialAtGenerationWithFragment(ctx, destination, addresses, preferIPv6, generation, strictFailures,
+		func(ctx context.Context, ip netip.Addr) (net.Conn, error, *lxFragmentObservation) {
+			conn, err := dialOne(ctx, ip)
+			return conn, err, nil
+		})
+}
+
+func (r *lxIPRace) dialAtGenerationWithFragment(
+	ctx context.Context,
+	destination M.Socksaddr,
+	addresses []netip.Addr,
+	preferIPv6 bool,
+	generation uint64,
+	strictFailures bool,
+	dialOne func(context.Context, netip.Addr) (net.Conn, error, *lxFragmentObservation),
+) (net.Conn, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if generation != r.currentGeneration() {
+		return nil, context.Canceled
 	}
 	ordered, _, delay := r.ordered(addresses, destination.Port, preferIPv6)
 	if len(ordered) == 0 {
 		return nil, errors.New("tcp_concurrent: DNS returned no usable IP addresses")
 	}
 	if len(ordered) == 1 {
-		return dialOne(ctx, ordered[0])
+		conn, err, _ := dialOne(ctx, ordered[0])
+		return conn, err
 	}
 
 	raceCtx, cancel := context.WithCancel(ctx)
@@ -183,17 +253,21 @@ func (r *lxIPRace) dial(
 	// buffered result and close the socket rather than leaking a loser.
 	defer func() {
 		cancel()
-		go func() {
+		drain := func() {
 			workers.Wait()
 			close(results)
-		}()
-		go func() {
 			for result := range results {
 				if result.conn != nil {
 					_ = result.conn.Close()
 				}
 			}
-		}()
+		}
+		if isAuthenticatedIPWarmup(ctx) {
+			// Keep the scheduler's slot until every speculative loser is closed.
+			drain()
+		} else {
+			go drain()
+		}
 	}()
 
 	next, active := 0, 0
@@ -206,8 +280,8 @@ func (r *lxIPRace) dial(
 		go func() {
 			defer workers.Done()
 			started := time.Now()
-			conn, err := dialOne(raceCtx, ip)
-			results <- lxIPRaceResult{ip, conn, err, time.Since(started)}
+			conn, err, fragment := dialOne(raceCtx, ip)
+			results <- lxIPRaceResult{addr: ip, conn: conn, err: err, latency: time.Since(started), fragment: fragment}
 		}()
 	}
 	start()
@@ -234,7 +308,14 @@ func (r *lxIPRace) dial(
 					_ = outcome.conn.Close()
 					return nil, ctx.Err()
 				}
-				r.recordWinner(outcome.addr, outcome.latency)
+				// strictFailures is enabled only for the adaptive authenticated
+				// REALITY path; plain TCP success must not mark an authenticated winner.
+				r.recordRaceWinnerWithFragment(generation, outcome.addr, outcome.latency, strictFailures, outcome.fragment)
+				if isAuthenticatedIPWarmup(ctx) {
+					// Close the verified winner before waiting for slower losers.
+					_ = outcome.conn.Close()
+					return nil, ErrAuthenticatedIPWarmupComplete
+				}
 				return outcome.conn, nil
 			}
 			if outcome.conn != nil {
@@ -247,7 +328,12 @@ func (r *lxIPRace) dial(
 				outcome.err = errors.New("tcp_concurrent: dial returned no connection")
 			}
 			failures = append(failures, outcome.err)
-			r.recordFailure(outcome.addr, destination.Port)
+			if outcome.fragment != nil {
+				r.invalidateFragmentMode(generation, outcome.fragment)
+			}
+			if shouldRecordIPFailureLx(outcome.err, strictFailures) {
+				r.recordFailure(generation, outcome.addr, destination.Port)
+			}
 			// Do not wait for the timer when an address fails quickly.
 			if next < len(ordered) && active < lxIPRaceMaxConcurrent {
 				start()

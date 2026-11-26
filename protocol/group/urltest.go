@@ -47,8 +47,8 @@ type URLTest struct {
 	logger                       log.ContextLogger
 	tags                         []string
 	link                         string
-	links                        []string // LX: optional redundant URLTest endpoints
-	tolerancePercent             uint8 // LX: adaptive RTT threshold, 0=legacy
+	links                        []string      // LX: optional redundant URLTest endpoints
+	tolerancePercent             uint8         // LX: adaptive RTT threshold, 0=legacy
 	minHold                      time.Duration // LX: minimum healthy-node hold
 	interval                     time.Duration
 	tolerance                    uint16
@@ -56,8 +56,8 @@ type URLTest struct {
 	group                        *URLTestGroup
 	checkAccess                  sync.Mutex
 	interruptExternalConnections bool
-	balancer                     *balancer // lx: SPEC 019 — nil for least_test (default)
-	failover                     bool      // lx: SPEC 116 — mode: failover
+	balancer                     *balancer       // lx: SPEC 019 — nil for least_test (default)
+	failover                     bool            // lx: SPEC 116 — mode: failover
 	passiveGuard                 *lxPassiveGuard // opt-in LX reliability
 	priorityOutbounds            map[string]bool // LX: tier-1 groups used before other outbounds
 	secondaryPriorityOutbounds   map[string]bool
@@ -77,18 +77,32 @@ func NewURLTest(ctx context.Context, router adapter.Router, logger log.ContextLo
 	}
 	// lx: SPEC 116 — failover holds the working node until it fails.
 	failover := isFailoverMode(options)
-	if options.PassiveGuard && balancer != nil { return nil, E.New("urltest: passive_guard is not supported with round_robin") }
-	if options.TolerancePercent > 100 { return nil, E.New("urltest: tolerance_percent must be 0..100") }
-	if options.MinHold < 0 || time.Duration(options.MinHold) > 10*time.Minute { return nil, E.New("urltest: min_hold must be between 0 and 10m") }
-	if (failover || balancer != nil) && (options.TolerancePercent != 0 || options.MinHold != 0) { return nil, E.New("urltest: adaptive threshold and min_hold apply only to least_test") }
-	if len(options.URLs) > 3 { return nil, E.New("urltest: urls supports at most 3 endpoints") }
-	if len(options.URLs) > 0 && options.URL != "" { return nil, E.New("urltest: specify either url or urls, not both") }
+	if options.PassiveGuard && balancer != nil {
+		return nil, E.New("urltest: passive_guard is not supported with round_robin")
+	}
+	if options.TolerancePercent > 100 {
+		return nil, E.New("urltest: tolerance_percent must be 0..100")
+	}
+	if options.MinHold < 0 || time.Duration(options.MinHold) > 10*time.Minute {
+		return nil, E.New("urltest: min_hold must be between 0 and 10m")
+	}
+	if (failover || balancer != nil) && (options.TolerancePercent != 0 || options.MinHold != 0) {
+		return nil, E.New("urltest: adaptive threshold and min_hold apply only to least_test")
+	}
+	if len(options.URLs) > 3 {
+		return nil, E.New("urltest: urls supports at most 3 endpoints")
+	}
+	if len(options.URLs) > 0 && options.URL != "" {
+		return nil, E.New("urltest: specify either url or urls, not both")
+	}
 	for i, endpoint := range options.URLs {
 		parsed, parseErr := url.Parse(endpoint)
 		if parseErr != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") || strings.TrimSpace(endpoint) != endpoint {
 			return nil, E.New("urltest: invalid URLTest endpoint: ", endpoint)
 		}
-		if slices.Contains(options.URLs[:i], endpoint) { return nil, E.New("urltest: duplicate URLTest endpoint: ", endpoint) }
+		if slices.Contains(options.URLs[:i], endpoint) {
+			return nil, E.New("urltest: duplicate URLTest endpoint: ", endpoint)
+		}
 	}
 	if (len(options.PriorityOutbounds) > 0 || len(options.SecondaryPriorityOutbounds) > 0) && (failover || balancer != nil) {
 		return nil, E.New("urltest: priority_outbounds is only valid with least_test mode")
@@ -135,7 +149,9 @@ func NewURLTest(ctx context.Context, router adapter.Router, logger log.ContextLo
 		priorityOutbounds:            primary,
 		secondaryPriorityOutbounds:   secondary,
 	}
-	if options.PassiveGuard { outbound.passiveGuard = newLXPassiveGuard() }
+	if options.PassiveGuard {
+		outbound.passiveGuard = newLXPassiveGuard()
+	}
 	if len(outbound.tags) == 0 {
 		return nil, E.New("missing tags")
 	}
@@ -170,7 +186,9 @@ func (s *URLTest) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 		group.secondaryPriorityOutbounds = s.secondaryPriorityOutbounds
 		group.tolerancePercent = s.tolerancePercent
 		group.minHold = s.minHold
-		if len(s.links) > 0 { group.links = append([]string(nil), s.links...) }
+		if len(s.links) > 0 {
+			group.links = append([]string(nil), s.links...)
+		}
 		if s.balancer != nil {
 			// lx: SPEC 020 — a pool rebuild changes the active routing tree; invalidate
 			// the router's reachable cache. ctx captured here has the invalidator.
@@ -470,9 +488,9 @@ type URLTestGroup struct {
 	failover                     bool                      // lx: SPEC 116 — set by URLTest.Start
 	priorityOutbounds            map[string]bool           // LX: tags of preferred group outbounds
 	secondaryPriorityOutbounds   map[string]bool
-	passiveGuard                 *lxPassiveGuard // LX: opt-in diagnostics
-	lastTickRunEnd               atomic.Int64              // lx: SPEC 125 — end of the last non-forced probe run, UnixNano
-	failoverSlow                 atomic.Pointer[tagSet]    // lx: SPEC 126 — confirmed-slow held tags during a failover reselect
+	passiveGuard                 *lxPassiveGuard        // LX: opt-in diagnostics
+	lastTickRunEnd               atomic.Int64           // lx: SPEC 125 — end of the last non-forced probe run, UnixNano
+	failoverSlow                 atomic.Pointer[tagSet] // lx: SPEC 126 — confirmed-slow held tags during a failover reselect
 	reachability                 adapter.ReachabilityReporter
 	// lx: SPEC 054 — penalty failover (least_test): tag → счётчик отказов «путь
 	// мёртв»; сброс только доказательством жизни (успешный дайл / ответ на пробу).
@@ -533,7 +551,11 @@ func (g *URLTestGroup) PostStart() {
 	// lx: SPEC 019 v2 — seed the pool so round_robin can route from the first connection,
 	// before the first health-check completes (history-warm nodes first, else config order).
 	g.seedPool()
-	go g.CheckOutbounds(g.ctx, false)
+	finish := urltest.BeginIPWarmupStartupProbe(g.ctx)
+	go func() {
+		defer finish()
+		g.CheckOutbounds(g.ctx, false)
+	}()
 }
 
 func (g *URLTestGroup) Touch() {
@@ -598,7 +620,9 @@ func (g *URLTestGroup) Select(network string) (adapter.Outbound, bool) {
 			}
 		}
 	}
-	if minOutbound != nil && g.holdSelected(network, minOutbound) { return minOutbound, true }
+	if minOutbound != nil && g.holdSelected(network, minOutbound) {
+		return minOutbound, true
+	}
 	for _, detour := range g.outbounds {
 		if !common.Contains(detour.Network(), network) || !g.guardAllows(RealTag(detour, network)) {
 			continue
@@ -626,8 +650,12 @@ func (g *URLTestGroup) Select(network string) (adapter.Outbound, bool) {
 
 // priorityTier returns 0 for Base, 1 for Russia chains, 2 for White/other.
 func (g *URLTestGroup) priorityTier(tag string) int {
-	if g.priorityOutbounds[tag] { return 0 }
-	if g.secondaryPriorityOutbounds[tag] { return 1 }
+	if g.priorityOutbounds[tag] {
+		return 0
+	}
+	if g.secondaryPriorityOutbounds[tag] {
+		return 1
+	}
 	return 2
 }
 
@@ -693,7 +721,9 @@ func (g *URLTestGroup) selectPriority(network string) (adapter.Outbound, bool) {
 		return best, true
 	}
 	for _, tier := range []int{0, 1, 2} {
-		if best, ok := choose(tier); ok { return best, true }
+		if best, ok := choose(tier); ok {
+			return best, true
+		}
 	}
 	// Cold start: retain the documented tier order until a probe supplies
 	// health evidence; quarantine is still respected.
@@ -788,7 +818,9 @@ func (g *URLTestGroup) testNodes(ctx context.Context, outbounds []adapter.Outbou
 	if g.passiveGuard != nil && !force {
 		eligible := make([]adapter.Outbound, 0, len(outbounds))
 		for _, node := range outbounds {
-			if g.guardAllows(RealTag(node, N.NetworkTCP)) { eligible = append(eligible, node) }
+			if g.guardAllows(RealTag(node, N.NetworkTCP)) {
+				eligible = append(eligible, node)
+			}
 		}
 		outbounds = eligible
 	}
@@ -825,6 +857,10 @@ func urlTestOutbounds(ctx context.Context, outboundManager adapter.OutboundManag
 }
 
 func urlTestOutboundsLinks(ctx context.Context, outboundManager adapter.OutboundManager, history *urltest.HistoryStorage, logger log.Logger, outbounds []adapter.Outbound, links []string, interval time.Duration, force bool, onAlive func(tag string)) map[string]uint16 {
+	// Reserve the plan before batch.Go can block on concurrency. This only
+	// suppresses speculative warmup; it never delays an ordinary URLTest.
+	finishPlan := urltest.PlanIPWarmupURLTests(ctx, outboundManager, outbounds)
+	defer finishPlan()
 	// lx: 050 — keep the per-node test context on the batch context: it descends
 	// from the caller's ctx (and so from g.ctx, which Close cancels), so both the
 	// batch's own cancellation and any deadline the caller passed in reach the probes.

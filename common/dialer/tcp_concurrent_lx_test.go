@@ -113,7 +113,7 @@ func TestLXIPRaceHonorsCallerCancellation(t *testing.T) {
 func TestLXIPRaceDoesNotTryIPOutsideCurrentDNSAnswer(t *testing.T) {
 	r := newLXIPRace()
 	addresses := lxRaceTestAddresses()
-	r.recordWinner(addresses[5], 20*time.Millisecond)
+	r.recordWinner(r.currentGeneration(), addresses[5], 20*time.Millisecond)
 	resolved := []netip.Addr{addresses[0], addresses[1]}
 	ordered, hasWinner, _ := r.ordered(resolved, 443, false)
 	if hasWinner || len(ordered) != 2 || ordered[0] != addresses[0] || ordered[1] != addresses[1] {
@@ -138,8 +138,8 @@ func TestLXIPRaceOptionDecodesAsBool(t *testing.T) {
 func TestLXIPRaceResetOnNetworkChange(t *testing.T) {
 	r := newLXIPRace()
 	target := netip.MustParseAddr("192.0.2.6")
-	r.recordWinner(target, 22*time.Millisecond)
-	r.recordFailure(netip.MustParseAddr("192.0.2.4"), 443)
+	r.recordWinner(r.currentGeneration(), target, 22*time.Millisecond)
+	r.recordFailure(r.currentGeneration(), netip.MustParseAddr("192.0.2.4"), 443)
 	r.resetHistory()
 	r.mu.Lock()
 	defer r.mu.Unlock()

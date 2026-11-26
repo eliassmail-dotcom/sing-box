@@ -24,9 +24,9 @@ import (
 // lx: SPEC 088 / SPEC 089 / SPEC 090 guards for the REALITY client (and, for 090,
 // the REALITY server).
 //
-// SPEC 088: `fragment` / `record_fragment` (and the SPEC 060 detour default) are
-// applied to the REALITY ClientHello. Upstream builds the UConn on the bare conn,
-// so the flags were written to the config and ignored — the test that catches a
+// SPEC 088: `fragment` / `record_fragment` (and the lx.sniff_guard shape, SPEC
+// 060, see sniff_guard_utls_lx_test.go) are applied to the REALITY ClientHello.
+// Upstream builds the UConn on the bare conn, so the flags were written to the config and ignored — the test that catches a
 // merge putting that back is TestLxRealityClientHelloGoesThroughFragmentConn.
 //
 // SPEC 089: `reality.key_share` — "" keeps what the fingerprint carries (the
@@ -46,7 +46,7 @@ func lxRealityOptions(fingerprint, keyShare string, fragment, recordFragment boo
 		Enabled:        true,
 		ServerName:     "www.example.com",
 		Fragment:       fragment,
-		RecordFragment: recordFragment,
+		RecordFragment: lxRecordFragment(recordFragment),
 		UTLS:           &option.OutboundUTLSOptions{Enabled: true, Fingerprint: fingerprint},
 		Reality: &option.OutboundRealityOptions{
 			Enabled:   true,
@@ -411,4 +411,14 @@ func lxRealityServerOptions(shortID string) option.InboundTLSOptions {
 			ShortID:    badoption.Listable[string]{shortID},
 		},
 	}
+}
+
+// lxRecordFragment maps the helpers' bool onto the option: false means "not
+// set", which leaves lx.sniff_guard free to shape the hello (SPEC 060).
+// lx: SPEC 156.
+func lxRecordFragment(enabled bool) *bool {
+	if !enabled {
+		return nil
+	}
+	return lxBoolPtr(true)
 }

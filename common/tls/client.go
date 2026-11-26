@@ -45,23 +45,16 @@ func applyTLSSpoof(conn net.Conn, spoof string, method tlsspoof.Method) (net.Con
 	return tlsspoof.NewConn(conn, method, spoof)
 }
 
-func NewDialerFromOptions(ctx context.Context, logger logger.ContextLogger, dialer N.Dialer, serverAddress string, options option.OutboundTLSOptions) (N.Dialer, error) {
-	return NewDialerFromClientOptions(dialer, ClientOptions{
-		Context:       ctx,
-		Logger:        logger,
-		ServerAddress: serverAddress,
-		Options:       options,
-	})
+// Preserve the LX++ helper used by detour-aware callers.
+func NewDialerFromClientOptions(dialer N.Dialer, options ClientOptions) (N.Dialer, error) {
+	return NewDialerFromOptions(dialer, options)
 }
 
-// NewDialerFromClientOptions is NewDialerFromOptions for callers that need to
-// set the extra ClientOptions fields (notably DialedThroughDetour, SPEC 060).
-// lx.
-func NewDialerFromClientOptions(dialer N.Dialer, clientOptions ClientOptions) (N.Dialer, error) {
-	if !clientOptions.Options.Enabled {
+func NewDialerFromOptions(dialer N.Dialer, options ClientOptions) (N.Dialer, error) {
+	if !options.Options.Enabled {
 		return dialer, nil
 	}
-	config, err := NewClientWithOptions(clientOptions)
+	config, err := NewClientWithOptions(options)
 	if err != nil {
 		return nil, err
 	}
@@ -84,6 +77,8 @@ type ClientOptions struct {
 	Options              option.OutboundTLSOptions
 	AllowEmptyServerName bool
 	KTLSCompatible       bool
+	DomainResolver       *option.DomainResolveOptions
+	DirectResolver       bool
 	// DialedThroughDetour marks that this client's TCP leg is carried by another
 	// outbound rather than the local network stack. It turns on ClientHello
 	// record fragmentation by default — see applyDetourFragmentDefault.
@@ -127,10 +122,11 @@ func applyDetourFragmentDefault(options *ClientOptions) {
 	if !options.DialedThroughDetour {
 		return
 	}
-	if options.Options.Fragment || options.Options.RecordFragment {
+	if options.Options.FinalMaskFragment != nil || options.Options.Fragment || options.Options.RecordFragment != nil {
 		return // user made a choice; do not second-guess it
 	}
-	options.Options.RecordFragment = true
+	recordFragment := true
+	options.Options.RecordFragment = &recordFragment
 }
 
 func NewClientWithOptions(options ClientOptions) (Config, error) {
@@ -139,6 +135,9 @@ func NewClientWithOptions(options ClientOptions) (Config, error) {
 	}
 	// lx: SPEC 060 — before any engine sees the options, so REALITY and uTLS
 	// clients get the same default as the standard one.
+	if options.Options.FinalMaskFragment != nil && options.Options.Engine != "" && options.Options.Engine != C.TLSEngineGo {
+		return nil, E.New("finalmask_fragment requires Go TLS engine")
+	}
 	applyDetourFragmentDefault(&options)
 	if !options.KTLSCompatible {
 		if options.Options.KernelTx {
@@ -160,13 +159,14 @@ func NewClientWithOptions(options ClientOptions) (Config, error) {
 	if options.Options.Reality != nil && options.Options.Reality.Enabled {
 		return newRealityClient(options.Context, options.Logger, options.ServerAddress, options.Options, options.AllowEmptyServerName)
 	} else if options.Options.UTLS != nil && options.Options.UTLS.Enabled {
-		return newUTLSClient(options.Context, options.Logger, options.ServerAddress, options.Options, options.AllowEmptyServerName)
+		return newUTLSClient(options.Context, options.Logger, options.ServerAddress, options.Options, options.AllowEmptyServerName, options.DomainResolver, options.DirectResolver)
 	}
-	return newSTDClient(options.Context, options.Logger, options.ServerAddress, options.Options, options.AllowEmptyServerName)
+	return newSTDClient(options.Context, options.Logger, options.ServerAddress, options.Options, options.AllowEmptyServerName, options.DomainResolver, options.DirectResolver)
 }
 
 func ClientHandshake(ctx context.Context, conn net.Conn, config Config) (Conn, error) {
 	ctx, stage := beginHandshakeLx(ctx, config) // lx: SPEC 139
+	conn = sniffGuardConnLx(ctx, conn, config)  // LX35
 	tlsConn, err := aTLS.ClientHandshake(ctx, conn, config)
 	endHandshakeLx(ctx, stage, tlsConn, err) // lx: SPEC 139
 	if err != nil {
@@ -187,12 +187,13 @@ type Dialer interface {
 }
 
 type defaultDialer struct {
-	dialer N.Dialer
-	config Config
+	dialer                 N.Dialer
+	config                 Config
+	adaptiveRecordFragment bool
 }
 
 func NewDialer(dialer N.Dialer, config Config) Dialer {
-	return &defaultDialer{dialer, config}
+	return &defaultDialer{dialer: dialer, config: config}
 }
 
 func (d *defaultDialer) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
@@ -220,12 +221,24 @@ func (d *defaultDialer) dialContext(ctx context.Context, destination M.Socksaddr
 		IPRaceEnabled() bool
 		DialVerifiedTCP(context.Context, M.Socksaddr, func(context.Context, net.Conn) (net.Conn, error)) (net.Conn, error)
 	}); ok && verifiedDialer.IPRaceEnabled() && destination.IsDomain() {
-		verifiedConn, raceErr := verifiedDialer.DialVerifiedTCP(ctx, destination,
+		dialVerified := verifiedDialer.DialVerifiedTCP
+		if d.adaptiveRecordFragment && adaptiveFragmentContextAllowedLx(ctx) {
+			if adaptive, ok := d.dialer.(interface {
+				DialVerifiedTCPAdaptiveFragmentLx(context.Context, M.Socksaddr, func(context.Context, net.Conn) (net.Conn, error)) (net.Conn, error)
+			}); ok {
+				dialVerified = adaptive.DialVerifiedTCPAdaptiveFragmentLx
+			}
+		}
+		verifiedConn, raceErr := dialVerified(ctx, destination,
 			func(attemptCtx context.Context, raw net.Conn) (net.Conn, error) {
 				// REALITY/uTLS configs contain per-handshake state. Do not
 				// share it between concurrent ClientHello attempts.
 				config := d.config.Clone()
+				if d.adaptiveRecordFragment {
+					applyAdaptiveFragmentModeLx(attemptCtx, config)
+				}
 				handshakeCtx, stage := beginHandshakeLx(attemptCtx, config)
+				raw = sniffGuardConnLx(handshakeCtx, raw, config) // LX35
 				tlsConn, err := aTLS.ClientHandshake(handshakeCtx, raw, config)
 				endHandshakeLx(handshakeCtx, stage, tlsConn, err)
 				if err != nil {
@@ -261,6 +274,7 @@ func (d *defaultDialer) dialContext(ctx context.Context, destination M.Socksaddr
 	// helpers wrap it so tls.NewDialer users (VLESS, Trojan, VMess, WS, gRPC, DoT/DoH)
 	// record the `tls` stage too, not only callers of tls.ClientHandshake.
 	handshakeCtx, stage := beginHandshakeLx(ctx, d.config)
+	conn = sniffGuardConnLx(handshakeCtx, conn, d.config) // LX35
 	tlsConn, err := aTLS.ClientHandshake(handshakeCtx, conn, d.config)
 	endHandshakeLx(handshakeCtx, stage, tlsConn, err)
 	// lx:end SPEC 139

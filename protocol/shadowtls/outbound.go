@@ -44,12 +44,11 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		options.TLS.MaxVersion = "1.2"
 	}
 	tlsConfig, err := tls.NewClientWithOptions(tls.ClientOptions{
-		Context:       ctx,
-		Logger:        logger,
-		ServerAddress: options.Server,
-		Options:       common.PtrValueOrDefault(options.TLS),
-		// lx: SPEC 060 — see the vless outbound.
-		DialedThroughDetour: tls.DialedThroughDetour(options.DialerOptions),
+		Context:        ctx,
+		Logger:         logger,
+		ServerAddress:  options.Server,
+		Options:        common.PtrValueOrDefault(options.TLS),
+		DomainResolver: options.DomainResolver,
 	})
 	if err != nil {
 		return nil, err

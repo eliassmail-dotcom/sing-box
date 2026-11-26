@@ -37,6 +37,8 @@ type UTLSClientConfig struct {
 	fragment              bool
 	fragmentFallbackDelay time.Duration
 	recordFragment        bool
+	fragmentChosen        bool // lx: SPEC 060 — fragment or record_fragment set in the config, an explicit false included
+	finalMask             *option.LXFinalMaskFragmentOptions
 	spoof                 string
 	spoofMethod           tlsspoof.Method
 }
@@ -88,7 +90,9 @@ func (c *UTLSClientConfig) STDConfig() (*STDConfig, error) {
 // REALITY client, which builds its UConn by hand and, before SPEC 088, did so on
 // the bare conn, silently ignoring both fragment flags. lx: SPEC 088.
 func (c *UTLSClientConfig) wrapClientConn(conn net.Conn) (net.Conn, error) {
-	if c.fragment || c.recordFragment {
+	if c.finalMask != nil && !sniffGuardShapedLx(conn) {
+		conn = newLXFinalMaskConn(conn, c.finalMask)
+	} else if (c.fragment || c.recordFragment) && !sniffGuardShapedLx(conn) { // lx: SPEC 060 — lx.sniff_guard shaped this handshake itself
 		conn = tf.NewConn(conn, c.ctx, c.fragment, c.recordFragment, c.fragmentFallbackDelay)
 	}
 	return applyTLSSpoof(conn, c.spoof, c.spoofMethod)
@@ -118,6 +122,8 @@ func (c *UTLSClientConfig) Clone() Config {
 		fragment:              c.fragment,
 		fragmentFallbackDelay: c.fragmentFallbackDelay,
 		recordFragment:        c.recordFragment,
+		fragmentChosen:        c.fragmentChosen, // lx: SPEC 060
+		finalMask:             c.finalMask,
 		spoof:                 c.spoof,
 		spoofMethod:           c.spoofMethod,
 	}
@@ -194,10 +200,13 @@ func (c *utlsALPNWrapper) HandshakeContext(ctx context.Context) error {
 }
 
 func NewUTLSClient(ctx context.Context, logger logger.ContextLogger, serverAddress string, options option.OutboundTLSOptions) (Config, error) {
-	return newUTLSClient(ctx, logger, serverAddress, options, false)
+	return newUTLSClient(ctx, logger, serverAddress, options, false, nil, false)
 }
 
-func newUTLSClient(ctx context.Context, logger logger.ContextLogger, serverAddress string, options option.OutboundTLSOptions, allowEmptyServerName bool) (Config, error) {
+func newUTLSClient(ctx context.Context, logger logger.ContextLogger, serverAddress string, options option.OutboundTLSOptions, allowEmptyServerName bool, domainResolver *option.DomainResolveOptions, directResolver bool) (Config, error) {
+	if err := options.FinalMaskFragment.Validate(); err != nil {
+		return nil, err
+	}
 	var serverName string
 	if options.ServerName != "" {
 		serverName = options.ServerName
@@ -326,16 +335,18 @@ func newUTLSClient(ctx context.Context, logger logger.ContextLogger, serverAddre
 		id:                    id,
 		fragment:              options.Fragment,
 		fragmentFallbackDelay: time.Duration(options.FragmentFallbackDelay),
-		recordFragment:        options.RecordFragment,
+		recordFragment:        options.RecordFragmentEnabled(), // lx: SPEC 156
 		spoof:                 spoof,
 		spoofMethod:           spoofMethod,
+		fragmentChosen:        options.FinalMaskFragment != nil || options.Fragment || options.RecordFragment != nil, // lx: SPEC 060
+		finalMask:             options.FinalMaskFragment,
 	}
 	config.SetServerName(serverName)
 	if options.ECH != nil && options.ECH.Enabled {
 		if options.Reality != nil && options.Reality.Enabled {
 			return nil, E.New("Reality is conflict with ECH")
 		}
-		config, err = parseECHClientConfig(ctx, config.(ECHCapableConfig), options)
+		config, err = parseECHClientConfig(ctx, config.(ECHCapableConfig), options, domainResolver, directResolver)
 		if err != nil {
 			return nil, err
 		}
@@ -363,15 +374,15 @@ func init() {
 	modernFingerprints := []utls.ClientHelloID{
 		utls.HelloChrome_Auto,
 		utls.HelloFirefox_Auto,
-		utls.HelloEdge_Auto,
 		utls.HelloSafari_Auto,
-		utls.HelloIOS_Auto,
 	}
 	randomFingerprint = modernFingerprints[rand.Intn(len(modernFingerprints))]
 
 	weights := utls.DefaultWeights
 	weights.TLSVersMax_Set_VersionTLS13 = 1
 	weights.FirstKeyShare_Set_CurveP256 = 0
+	weights.CurveIDs_Append_X25519 = 1
+	weights.KeyShare_Append_RandomGroups = 1
 	randomizedFingerprint = utls.HelloRandomized
 	randomizedFingerprint.Seed, _ = utls.NewPRNGSeed()
 	randomizedFingerprint.Weights = &weights

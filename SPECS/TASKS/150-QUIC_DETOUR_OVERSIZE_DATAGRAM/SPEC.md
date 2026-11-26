@@ -7,7 +7,7 @@
 | Field | Value |
 |-------|-------|
 | Type | B (bug) — a QUIC client (`masque` h3, upstream `hysteria2`, `tuic`) dies a few seconds after the handshake when its UDP runs through a stream-tunnelled `detour` |
-| Status | I (implemented) — 2026-11-02: helper, three seams, red/green units in the tree; the final build on the owner's Mac kept h3 alive through the n009 relay in plain and XUDP packing (4 of 4 pings over 20 s, where it died at 1–5 s before); the second relay of the 2026-11-01 stand (n002) had broken on its own that day (vless TCP ping failed, QUIC through it landed on a foreign key); the reporter's device not run; hysteria2 and tuic through a vless detour verified on a loopback stand with an injected WARP-like ladder (§3): pre-fix binary dies with `short buffer`, fixed one 7 of 7 in both packings |
+| Status | D (done) — 2026-11-02: helper, three seams, red/green units in the tree; the final build on the owner's Mac kept h3 alive through the n009 relay in plain and XUDP packing (4 of 4 pings over 20 s, where it died at 1–5 s before); the second relay of the 2026-11-01 stand (n002) had broken on its own that day (vless TCP ping failed, QUIC through it landed on a foreign key); the reporter's device not run; hysteria2 and tuic through a vless detour verified on a loopback stand with an injected WARP-like ladder (§3): pre-fix binary dies with `short buffer`, fixed one 7 of 7 in both packings; closed by the owner 2026-11-14 |
 | Branch | `lx` |
 | Build tag | — (`common/lxdatagram`, `protocol/masque` build always; the `protocol/hysteria2` and `protocol/tuic` seams sit under upstream's `with_quic`) |
 | Origin | Telegram report by zomg 2026-11-01 (LxBox 2.25.19-rc.1, core `v1.14.4-lx.28`): the node "WARP (MASQUE) h3" with `detour` through free `[BL]` relays never comes up, while MASQUE h2 and AWG through the same relays work. Stand on the owner's Mac 2026-11-01 against the relays of `igareck/vpn-configs-for-russia`, decisive measurement with a debug build the same evening |
@@ -351,9 +351,11 @@ serve MASQUE (h3 `handshake failure`, h2 a generic edge key).
 
 Why h2 passes and h3 does not, by Xray's code (`app/dispatcher/default.go`,
 `common/protocol/quic/sniff.go`, `common/protocol/tls/sniff.go`): the sniff loop has a 200 ms
-budget; the TLS sniffer answers a partial ClientHello with `ErrNoClue`, which counts as an attempt,
-and the loop gives up after two, so a ClientHello split into TLS records (SPEC 060 does it under any
-`detour`, hence every relay user's h2 worked) is never parsed and the destination stays. The QUIC
+budget; the TLS sniffer parses only the first TLS record, and a ClientHello split into records
+(SPEC 060 does it under any `detour`, hence every relay user's h2 worked) has its first record cut
+inside the SNI, so the extensions length does not match and the sniffer answers `not client hello`
+on the first attempt — the ClientHello is never parsed and the destination stays (checked against
+Xray `c456141` and a copy of `SniffTLS`, 2026-11-12; see SPEC 060 §1.1). The QUIC
 sniffer decrypts the Initial packets with the version's initial secret, reassembles CRYPTO frames
 across packets and answers `ErrProtoNeedMoreData`, which does not count as an attempt: it keeps
 reading until the 200 ms run out. A QUIC ClientHello, whole or split, is therefore parsed as long
@@ -367,7 +369,7 @@ with a fake SNI (`addons.mozilla.org` in #37) cannot pass such a relay either.
 
 ### 3.2 Prototype: holding the second Initial past the relay sniff budget (2026-11-02)
 
-Superseded by [SPEC 151](../151-QUIC_SNIFF_DECOY/SPEC.md): a one-byte decoy datagram ahead of the Initial takes Xray's QUIC sniffer out of the flow with no delay; the prototype below is removed from the tree. Research, kept so the result is not lost. Follows from §3.1: Xray's
+Superseded by [SPEC 060](../060-TLS_FRAGMENT_AUTO_ON_DETOUR/HISTORY.md): a one-byte decoy datagram ahead of the Initial takes Xray's QUIC sniffer out of the flow with no delay; the prototype below is removed from the tree. Research, kept so the result is not lost. Follows from §3.1: Xray's
 QUIC sniffer reassembles the ClientHello across Initial packets and answers `ErrProtoNeedMoreData`,
 which does not count against its two-attempt budget, so it keeps reading until its 200 ms timer
 runs out. If the second Initial datagram of a fresh h3 dial arrives after that timer, the sniffer

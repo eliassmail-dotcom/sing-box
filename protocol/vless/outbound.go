@@ -9,6 +9,7 @@ import (
 	"github.com/sagernet/sing-box/common/dialer"
 	"github.com/sagernet/sing-box/common/mux"
 	"github.com/sagernet/sing-box/common/tls"
+	"github.com/sagernet/sing-box/common/urltest"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
@@ -20,6 +21,7 @@ import (
 	"github.com/sagernet/sing/common/bufio"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
+	"github.com/sagernet/sing/service"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 )
@@ -49,6 +51,8 @@ type Outbound struct {
 	// encryption is the VLESS post-quantum layer, nil unless `encryption` is
 	// configured. It wraps the dialed conn beneath the vless client (lx: SPEC 032).
 	encryption *encryption.ClientInstance
+	ipWarmup *urltest.IPWarmupCoordinator
+	ipWarmupEligible bool
 }
 
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.VLESSOutboundOptions) (adapter.Outbound, error) {
@@ -61,19 +65,18 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		logger:     logger,
 		dialer:     outboundDialer,
 		serverAddr: options.ServerOptions.Build(),
+		ipWarmup: service.PtrFromContext[urltest.IPWarmupCoordinator](ctx),
 	}
 	if options.TLS != nil {
 		outbound.tlsConfig, err = tls.NewClientWithOptions(tls.ClientOptions{
-			Context:       ctx,
-			Logger:        logger,
-			ServerAddress: options.Server,
-			Options:       common.PtrValueOrDefault(options.TLS),
+			Context:        ctx,
+			Logger:         logger,
+			ServerAddress:  options.Server,
+			Options:        common.PtrValueOrDefault(options.TLS),
+			DomainResolver: options.DomainResolver,
 			KTLSCompatible: common.PtrValueOrDefault(options.Transport).Type == "" &&
 				!common.PtrValueOrDefault(options.Multiplex).Enabled &&
 				options.Flow == "",
-			// lx: SPEC 060 — fragment the ClientHello by default when the leg is
-			// someone else's outbound (PMTU black hole behind it is invisible to us).
-			DialedThroughDetour: tls.DialedThroughDetour(options.DialerOptions),
 		})
 		if err != nil {
 			return nil, err
@@ -83,7 +86,17 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		// an unconditional NewDialer here wraps that nil config and SIGSEGVs on the
 		// first handshake (SPEC 045). Same guard as vmess.
 		if outbound.tlsConfig != nil {
+			// lx: iOS adaptive verified race, native direct VLESS+REALITY only.
+			if options.Transport == nil && options.TLS.Reality != nil && options.TLS.Reality.Enabled && options.Detour == "" && options.TCPConcurrent && options.ServerIsDomain() {
+				if adaptive, ok := outboundDialer.(interface{ EnableAdaptiveVerifiedTCP() }); ok {
+					adaptive.EnableAdaptiveVerifiedTCP()
+					outbound.ipWarmupEligible = outbound.ipWarmup != nil && !common.PtrValueOrDefault(options.Multiplex).Enabled
+				}
+			}
 			outbound.tlsDialer = tls.NewDialer(outboundDialer, outbound.tlsConfig)
+			if outbound.ipWarmup != nil && options.Transport == nil && options.TLS.Reality != nil && options.TLS.Reality.Enabled && !tls.DialedThroughDetour(options.DialerOptions) && options.TCPConcurrent && options.ServerIsDomain() {
+				outbound.tlsDialer = tls.NewAdaptiveRealityDialerLx(outboundDialer, outbound.tlsConfig, *options.TLS)
+			}
 		}
 		// lx:end tls-disabled-dialer
 	}
@@ -130,6 +143,8 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 }
 
 func (h *Outbound) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+	finish := h.beginIPWarmupUse(ctx)
+	defer finish()
 	if h.multiplexDialer == nil {
 		switch N.NetworkName(network) {
 		case N.NetworkTCP:
@@ -150,6 +165,8 @@ func (h *Outbound) DialContext(ctx context.Context, network string, destination 
 }
 
 func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
+	finish := h.beginIPWarmupUse(ctx)
+	defer finish()
 	if h.multiplexDialer == nil {
 		h.logger.InfoContext(ctx, "outbound packet connection to ", destination)
 		return (*vlessDialer)(h).ListenPacket(ctx, destination)

@@ -108,7 +108,9 @@ func (g *URLTestGroup) fastestByDelay(network string) adapter.Outbound {
 	// White node must not hide repeated failures of the fastest still-healthy Base.
 	if len(g.priorityOutbounds) > 0 {
 		for _, tier := range []int{0, 1, 2} {
-			if best := g.fastestByDelayTier(network, tier); best != nil { return best }
+			if best := g.fastestByDelayTier(network, tier); best != nil {
+				return best
+			}
 		}
 		return nil
 	}
@@ -153,17 +155,25 @@ func (g *URLTestGroup) penaltyBest(network string, excludeTag string) adapter.Ou
 			var minPenalty int64
 			var minDelay uint16
 			for _, detour := range g.outbounds {
-				if g.priorityTier(detour.Tag()) != preferred || !supportsNetwork(detour, network) || !g.guardAllows(RealTag(detour, N.NetworkTCP)) { continue }
+				if g.priorityTier(detour.Tag()) != preferred || !supportsNetwork(detour, network) || !g.guardAllows(RealTag(detour, N.NetworkTCP)) {
+					continue
+				}
 				tag := RealTag(detour, N.NetworkTCP)
-				if tag == excludeTag || !g.guardAllows(tag) { continue }
+				if tag == excludeTag || !g.guardAllows(tag) {
+					continue
+				}
 				history := g.history.LoadURLTestHistory(tag)
-				if history == nil { continue }
+				if history == nil {
+					continue
+				}
 				p := g.penaltyOf(tag)
 				if choice == nil || p < minPenalty || (p == minPenalty && history.Delay < minDelay) {
 					choice, minPenalty, minDelay = detour, p, history.Delay
 				}
 			}
-			if choice != nil { return choice }
+			if choice != nil {
+				return choice
+			}
 		}
 		return nil
 	}
@@ -196,7 +206,9 @@ func (g *URLTestGroup) penaltyBest(network string, excludeTag string) adapter.Ou
 // ранжирование; иначе — апстримный Select как есть. Используется performUpdateCheck.
 func (g *URLTestGroup) selectPenaltyAware(network string) (adapter.Outbound, bool) {
 	// A responsive primary group must never lose to a faster whitelist fallback.
-	if len(g.priorityOutbounds) > 0 { return g.selectPriority(network) }
+	if len(g.priorityOutbounds) > 0 {
+		return g.selectPriority(network)
+	}
 	if g.balancer == nil && g.penaltyEmergency(network) {
 		if best := g.penaltyBest(network, ""); best != nil {
 			return best, true

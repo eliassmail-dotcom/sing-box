@@ -53,6 +53,22 @@ assert "DialedThroughDetour bool" in t
 assert t.count("sniffGuardConnLx(") == 3
 p.write_text(t)
 PY
+# LX35 removed RealityClientConfig.ctx and made the fallback HTTP request
+# context-aware. Preserve our asynchronous rejection path (the verified race
+# must return the definitive failure immediately) but use its handshake ctx.
+# Do not restore the old REALITY struct or overwrite LX35 verifier changes.
+python3 - <<'PY'
+from pathlib import Path
+p = Path("common/tls/reality_client.go")
+t = p.read_text()
+old = "go realityClientFallback(e.ctx, uConn, e.uClient.ServerName(), e.uClient.id)"
+new = "go realityClientFallback(ctx, uConn, e.uClient.ServerName(), e.uClient.id)"
+assert t.count(old) == 1, ("LX35 REALITY fallback merge", t.count(old))
+t = t.replace(old, new)
+assert "return nil, lxRealityVerificationFailure{}" in t
+assert "classifyRealityTransportFailureLx(ctx, err)" in t
+p.write_text(t)
+PY
 echo "Merged upstream files:"
 git diff HEAD --stat | tail -45
 # Guard core features added after the upstream base.

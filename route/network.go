@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/lxsniffguard"
 	"github.com/sagernet/sing-box/common/settings"
 	"github.com/sagernet/sing-box/common/taskmonitor"
+	"github.com/sagernet/sing-box/common/urltest"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-tun"
@@ -461,6 +463,11 @@ func (r *NetworkManager) ResetNetwork(ctx context.Context) {
 	}
 	// lx:end early-rpc-guard
 
+	if r.ctx != nil {
+		if warmup := service.PtrFromContext[urltest.IPWarmupCoordinator](r.ctx); warmup != nil {
+			warmup.NetworkChanged()
+		}
+	}
 	if r.connectionManager != nil {
 		r.connectionManager.CloseAll()
 	}
@@ -499,6 +506,7 @@ func (r *NetworkManager) ResetNetwork(ctx context.Context) {
 		}
 	}
 
+	lxsniffguard.FromContext(r.ctx).NetworkChanged() // lx: SPEC 060 — labels of local paths start over
 	r.router.ResetNetwork()
 }
 

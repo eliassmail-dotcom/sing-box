@@ -2,9 +2,6 @@ package option
 
 import (
 	"reflect"
-	"slices"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/sagernet/sing-box/schema"
@@ -27,34 +24,139 @@ type LXOptions struct {
 	// MTUAlign is the path-MTU alignment policy for nodes above IP tunnels
 	// (lx: SPEC 120): a mode string, or an object with the mode and the tags
 	// to leave alone. Absent = "clamp".
-	MTUAlign *LXMTUAlign `json:"mtu_align,omitempty"`
-	// QUICSniffDecoy sends one non-QUIC byte ahead of the first Initial of a
-	// QUIC dial, so a relay that rewrites the destination by the sniffed SNI
-	// leaves it as dialled (lx: SPEC 151). An object: mode (where), outbound_type
-	// (who), detour_type (through which relays), send (retry or always).
-	// Absent = off.
-	QUICSniffDecoy *LXQUICSniffDecoyOptions `json:"quic_sniff_decoy,omitempty"`
-	// AWGMasquerade is removed (lx: SPEC 153 → 151): any value fails the load.
+	MTUAlign   *LXMTUAlign          `json:"mtu_align,omitempty"`
+	SniffGuard *LXSniffGuardOptions `json:"sniff_guard,omitempty"` // lx: SPEC 060
+	// QUICSniffDecoy is removed (lx: SPEC 060): any value fails the load.
+	QUICSniffDecoy *LXRemovedQUICSniffDecoy `json:"quic_sniff_decoy,omitempty"`
+	// AWGMasquerade is removed (lx: SPEC 153 → 060): any value fails the load.
 	AWGMasquerade *LXRemovedAWGMasquerade `json:"awg_masquerade,omitempty"`
 }
 
-// LXWGOptions holds the WG/AWG endpoint knobs: the three idle keys carry the
-// SPEC 020 semantics, lazy_build, build_max and build_overflow are SPEC 097.
-// All six act only in builds with with_lx_idle_suspend; without the tag the
-// router refuses them at start.
+// UnmarshalJSON decodes the block as a plain struct and fails on any
+// presence of a removed key, null included: a null leaves a pointer field
+// nil without calling the removed type's UnmarshalJSON.
+func (o *LXOptions) UnmarshalJSON(content []byte) error {
+	var keys map[string]json.RawMessage
+	if json.Unmarshal(content, &keys) == nil {
+		if _, present := keys["quic_sniff_decoy"]; present {
+			return E.New(errLXQUICSniffDecoyRemoved)
+		}
+		if _, present := keys["awg_masquerade"]; present {
+			return E.New(errLXAWGMasqueradeRemoved)
+		}
+	}
+	return json.UnmarshalDisallowUnknownFields(content, (*lxOptionsPlain)(o))
+}
+
+// lxOptionsPlain is LXOptions without its methods.
+type lxOptionsPlain LXOptions
+
+func (o LXOptions) DescribeSchema(builder schema.Builder) (*schema.Node, error) {
+	return builder.Define("LXOptions", func() (*schema.Node, error) {
+		node := schema.StrictObject()
+		err := builder.FlattenStruct(node, reflect.TypeFor[lxOptionsPlain]())
+		if err != nil {
+			return nil, err
+		}
+		return node, nil
+	})
+}
+
+// LXWGOptions holds the WG/AWG endpoint knobs (SPEC 098 §2.1). Only the idle
+// sub-block needs a with_lx_idle_suspend build; buffers and connected_socket
+// act in every build.
 type LXWGOptions struct {
-	// IdleSuspend is the idle threshold after which an endpoint outside the
+	Idle    *LXWGIdleOptions    `json:"idle,omitempty"`
+	Buffers *LXWGBuffersOptions `json:"buffers,omitempty"` // SPEC 158 §9
+	// ConnectedSocket connects the tunnel socket to the server address in
+	// single-peer mode (SPEC 160). Linux and Android; elsewhere it is accepted
+	// and changes nothing.
+	ConnectedSocket bool `json:"connected_socket,omitempty"`
+
+	// The flat idle keys moved into lx.wg.idle (owner 2026-11-23) with no
+	// compatibility period: any value fails the load and names the new key.
+	MovedIdleSuspend          *LXMovedWGIdleKey `json:"idle_suspend,omitempty"`
+	MovedIdleSuspendReachable *LXMovedWGIdleKey `json:"idle_suspend_reachable,omitempty"`
+	MovedIdleTeardown         *LXMovedWGIdleKey `json:"idle_teardown,omitempty"`
+	MovedLazyBuild            *LXMovedWGIdleKey `json:"lazy_build,omitempty"`
+	MovedBuildMax             *LXMovedWGIdleKey `json:"build_max,omitempty"`
+	MovedBuildOverflow        *LXMovedWGIdleKey `json:"build_overflow,omitempty"`
+}
+
+// lxWGMovedKeys maps each flat key to its name in lx.wg.idle.
+var lxWGMovedKeys = [...]struct{ old, new string }{
+	{"idle_suspend", "suspend"},
+	{"idle_suspend_reachable", "suspend_reachable"},
+	{"idle_teardown", "teardown"},
+	{"lazy_build", "lazy_build"},
+	{"build_max", "build_max"},
+	{"build_overflow", "build_overflow"},
+}
+
+// UnmarshalJSON checks the moved keys by presence, null included, so the
+// error names the exact new path; the guard type alone could not tell which
+// key it sits under.
+func (o *LXWGOptions) UnmarshalJSON(content []byte) error {
+	var keys map[string]json.RawMessage
+	if json.Unmarshal(content, &keys) == nil {
+		for _, key := range lxWGMovedKeys {
+			if _, present := keys[key.old]; present {
+				return E.New("lx.wg.", key.old, " is moved to lx.wg.idle.", key.new)
+			}
+		}
+	}
+	return json.UnmarshalDisallowUnknownFields(content, (*lxWGOptionsPlain)(o))
+}
+
+// lxWGOptionsPlain is LXWGOptions without its methods.
+type lxWGOptionsPlain LXWGOptions
+
+func (o LXWGOptions) DescribeSchema(builder schema.Builder) (*schema.Node, error) {
+	return builder.Define("LXWGOptions", func() (*schema.Node, error) {
+		node := schema.StrictObject()
+		err := builder.FlattenStruct(node, reflect.TypeFor[lxWGOptionsPlain]())
+		if err != nil {
+			return nil, err
+		}
+		return node, nil
+	})
+}
+
+// LXMovedWGIdleKey is the guard on a flat lx.wg idle key. LXWGOptions catches
+// the key by name first; this error is the fallback for a direct decode.
+type LXMovedWGIdleKey struct{}
+
+const errLXWGIdleKeyMoved = "the lx.wg idle keys are moved to lx.wg.idle"
+
+func (LXMovedWGIdleKey) UnmarshalJSON([]byte) error {
+	return E.New(errLXWGIdleKeyMoved)
+}
+
+func (LXMovedWGIdleKey) MarshalJSON() ([]byte, error) {
+	return nil, E.New(errLXWGIdleKeyMoved)
+}
+
+func (LXMovedWGIdleKey) DescribeSchema(builder schema.Builder) (*schema.Node, error) {
+	return &schema.Node{Deprecated: true}, nil
+}
+
+// LXWGIdleOptions holds the idle keys: suspend, suspend_reachable and teardown
+// carry the SPEC 020 semantics, lazy_build, build_max and build_overflow are
+// SPEC 097. All six act only in builds with with_lx_idle_suspend; without the
+// tag the router refuses them at start.
+type LXWGIdleOptions struct {
+	// Suspend is the idle threshold after which an endpoint outside the
 	// active routing tree is brought Down. 0 / absent disables the idle tick.
-	IdleSuspend badoption.Duration `json:"idle_suspend,omitempty"`
-	// IdleSuspendReachable is the longer threshold for endpoints inside the
-	// tree. Must be >= IdleSuspend and requires it.
-	IdleSuspendReachable badoption.Duration `json:"idle_suspend_reachable,omitempty"`
-	// IdleTeardown is how long an already-sleeping endpoint sleeps before its
-	// device and netstack are torn down. Absent inherits IdleSuspendReachable;
-	// an explicit "0" disables teardown, hence the pointer. Requires IdleSuspend.
-	IdleTeardown *badoption.Duration `json:"idle_teardown,omitempty"`
+	Suspend badoption.Duration `json:"suspend,omitempty"`
+	// SuspendReachable is the longer threshold for endpoints inside the
+	// tree. Must be >= Suspend and requires it.
+	SuspendReachable badoption.Duration `json:"suspend_reachable,omitempty"`
+	// Teardown is how long an already-sleeping endpoint sleeps before its
+	// device and netstack are torn down. Absent inherits SuspendReachable;
+	// an explicit "0" disables teardown, hence the pointer. Requires Suspend.
+	Teardown *badoption.Duration `json:"teardown,omitempty"`
 	// LazyBuild starts endpoints torn down and builds the device on first dial
-	// (SPEC 097). Requires IdleSuspend. An endpoint with listen_port is never
+	// (SPEC 097). Requires Suspend. An endpoint with listen_port is never
 	// lazy.
 	LazyBuild bool `json:"lazy_build,omitempty"`
 	// BuildMax caps the number of simultaneously built devices; 0 = no cap
@@ -65,6 +167,21 @@ type LXWGOptions struct {
 	// builds above the cap (SPEC 097).
 	BuildOverflow string `json:"build_overflow,omitempty"`
 }
+
+// LXWGBuffersOptions holds the tunnel buffer knobs (SPEC 158 §9.1). Both
+// fields are pointers so that a default written out is told apart from an
+// invalid zero, and canonicalizes away.
+type LXWGBuffersOptions struct {
+	// ReadDatagramCount is the number of datagrams reserved per socket read,
+	// 1–128; absent = 128, as upstream.
+	ReadDatagramCount *int `json:"read_datagram_count,omitempty"`
+	// SendByMTU sizes the buffers read from the stack by the tunnel MTU
+	// instead of 64 KiB; absent = true. false is a diagnostic switch.
+	SendByMTU *bool `json:"send_by_mtu,omitempty"`
+}
+
+// lxWGReadDatagramCountMax is the upstream batch size and the default.
+const lxWGReadDatagramCountMax = 128
 
 // LXMASQUEOptions holds the MASQUE outbound knobs.
 type LXMASQUEOptions struct {
@@ -138,108 +255,8 @@ func validateLXMTUAlignMode(mode string) error {
 	return E.New(`lx.mtu_align.mode must be "off", "fill" or "clamp"`)
 }
 
-// The lx.quic_sniff_decoy.mode values (lx: SPEC 151): on which paths the
-// decoy is allowed, by what lies under the QUIC stack — "direct" a kernel
-// socket, "detour" a conn carried by another outbound of a type in
-// detour_type, "all" both, "off" nowhere.
-const (
-	LXQUICSniffDecoyOff    = "off"
-	LXQUICSniffDecoyDirect = "direct"
-	LXQUICSniffDecoyDetour = "detour"
-	LXQUICSniffDecoyAll    = "all"
-)
-
-// The lx.quic_sniff_decoy.send values (lx: SPEC 151): "retry" — the first
-// attempt is clean and a failed one is retried with the decoy, "always" —
-// every applicable dial carries it.
-const (
-	LXQUICSniffDecoySendRetry  = "retry"
-	LXQUICSniffDecoySendAlways = "always"
-)
-
-// LXQUICSniffDecoyOutboundTypes are the outbound types that can send the
-// decoy, in the order the docs list them. The type selects the node; the byte
-// goes only where the node actually opens QUIC (masque h3, trusttunnel with
-// quic, vless/vmess/trojan with XHTTP on h3, wireguard before a QUIC-shaped
-// AmneziaWG burst).
-var LXQUICSniffDecoyOutboundTypes = []string{"masque", "hysteria2", "tuic", "trusttunnel", "vless", "vmess", "trojan", "wireguard"}
-
-// lxQUICSniffDecoyDefaultOutboundTypes and lxQUICSniffDecoyDefaultDetourTypes
-// are the lists an absent key stands for (owner 2026-11-07).
-var (
-	lxQUICSniffDecoyDefaultOutboundTypes = []string{"masque"}
-	lxQUICSniffDecoyDefaultDetourTypes   = []string{"vless"}
-)
-
-// lxQUICSniffDecoyGroupTypes cannot be a detour_type: a group is always
-// resolved to the member it picked.
-var lxQUICSniffDecoyGroupTypes = []string{"selector", "urltest"}
-
-const errLXQUICSniffDecoyForm = "lx.quic_sniff_decoy must be an object: {mode, outbound_type, detour_type, send}"
-
-type _LXQUICSniffDecoyOptions struct {
-	Mode         string                     `json:"mode,omitempty" enum:"off,direct,detour,all"`
-	OutboundType badoption.Listable[string] `json:"outbound_type,omitempty"`
-	DetourType   badoption.Listable[string] `json:"detour_type,omitempty"`
-	Send         string                     `json:"send,omitempty" enum:"retry,always"`
-}
-
-// LXQUICSniffDecoyOptions is lx.quic_sniff_decoy (lx: SPEC 151). Only the
-// object form is accepted: the string and boolean forms of lx.30–lx.32 are a
-// load error (owner 2026-11-07).
-type LXQUICSniffDecoyOptions _LXQUICSniffDecoyOptions
-
-func (o *LXQUICSniffDecoyOptions) UnmarshalJSON(bytes []byte) error {
-	trimmed := strings.TrimSpace(string(bytes))
-	if !strings.HasPrefix(trimmed, "{") {
-		return E.New(errLXQUICSniffDecoyForm)
-	}
-	if err := json.UnmarshalDisallowUnknownFields(bytes, (*_LXQUICSniffDecoyOptions)(o)); err != nil {
-		return E.Cause(err, "lx.quic_sniff_decoy")
-	}
-	return o.validate()
-}
-
-func (o LXQUICSniffDecoyOptions) validate() error {
-	switch o.Mode {
-	case "", LXQUICSniffDecoyOff, LXQUICSniffDecoyDirect, LXQUICSniffDecoyDetour, LXQUICSniffDecoyAll:
-	default:
-		return E.New(`lx.quic_sniff_decoy.mode must be "off", "direct", "detour" or "all"`)
-	}
-	switch o.Send {
-	case "", LXQUICSniffDecoySendRetry, LXQUICSniffDecoySendAlways:
-	default:
-		return E.New(`lx.quic_sniff_decoy.send must be "retry" or "always"`)
-	}
-	for _, outboundType := range o.OutboundType {
-		if !slices.Contains(LXQUICSniffDecoyOutboundTypes, outboundType) {
-			return E.New("lx.quic_sniff_decoy.outbound_type: ", strconv.Quote(outboundType), " is not a QUIC client; one of ", strings.Join(LXQUICSniffDecoyOutboundTypes, ", "))
-		}
-	}
-	for _, detourType := range o.DetourType {
-		if detourType == "" {
-			return E.New("lx.quic_sniff_decoy.detour_type: empty type")
-		}
-		if slices.Contains(lxQUICSniffDecoyGroupTypes, detourType) {
-			return E.New("lx.quic_sniff_decoy.detour_type: ", strconv.Quote(detourType), " is a group; name the member types, a group is resolved to the member it picks")
-		}
-	}
-	return nil
-}
-
-func (o LXQUICSniffDecoyOptions) DescribeSchema(builder schema.Builder) (*schema.Node, error) {
-	return builder.Define("LXQUICSniffDecoyOptions", func() (*schema.Node, error) {
-		node := schema.StrictObject()
-		err := builder.FlattenStruct(node, reflect.TypeFor[LXQUICSniffDecoyOptions]())
-		if err != nil {
-			return nil, err
-		}
-		return node, nil
-	})
-}
-
 // LXRemovedAWGMasquerade is the guard on the removed lx.awg_masquerade (SPEC
-// 153, removed by SPEC 151, owner 2026-11-07): any value is a load error, so a
+// 153, removed by SPEC 060, owner 2026-11-07): any value is a load error, so a
 // config that still carries the key fails with the reason instead of an
 // unknown-field message. The masquerade burst is sent on every path.
 type LXRemovedAWGMasquerade struct{}
@@ -258,7 +275,26 @@ func (LXRemovedAWGMasquerade) DescribeSchema(builder schema.Builder) (*schema.No
 	return &schema.Node{Deprecated: true}, nil
 }
 
-// LXBuildOverflow is the resolved lx.wg.build_overflow.
+// LXRemovedQUICSniffDecoy is the guard on the removed lx.quic_sniff_decoy
+// (SPEC 060): any value is a load error that names its replacement. There is
+// no backward compatibility (owner 2026-11-13).
+type LXRemovedQUICSniffDecoy struct{}
+
+const errLXQUICSniffDecoyRemoved = "lx.quic_sniff_decoy is removed: the QUIC sniff decoy is configured by lx.sniff_guard.quic"
+
+func (LXRemovedQUICSniffDecoy) UnmarshalJSON([]byte) error {
+	return E.New(errLXQUICSniffDecoyRemoved)
+}
+
+func (LXRemovedQUICSniffDecoy) MarshalJSON() ([]byte, error) {
+	return nil, E.New(errLXQUICSniffDecoyRemoved)
+}
+
+func (LXRemovedQUICSniffDecoy) DescribeSchema(builder schema.Builder) (*schema.Node, error) {
+	return &schema.Node{Deprecated: true}, nil
+}
+
+// LXBuildOverflow is the resolved lx.wg.idle.build_overflow.
 type LXBuildOverflow uint8
 
 const (
@@ -277,46 +313,36 @@ type LXResolved struct {
 	// applies its own default.
 	TrustTunnel LXTrustTunnelResolved
 	// MTUAlign always carries a mode: "clamp" when the key is absent.
-	MTUAlign LXMTUAlignResolved
-	// QUICSniffDecoy is the resolved lx.quic_sniff_decoy (lx: SPEC 151):
-	// defaults applied, mode "off" when the key is absent.
-	QUICSniffDecoy LXQUICSniffDecoyResolved
+	MTUAlign   LXMTUAlignResolved
+	SniffGuard LXSniffGuardResolved // lx: SPEC 060
 }
 
-// LXQUICSniffDecoyResolved is lx.quic_sniff_decoy with its defaults applied
-// (lx: SPEC 151): Mode "off" when the key is absent, OutboundTypes
-// ["masque"] and DetourTypes ["vless"] when their lists are absent, Retry true
-// unless send is "always".
-type LXQUICSniffDecoyResolved struct {
-	Mode          string
-	OutboundTypes []string
-	DetourTypes   []string
-	Retry         bool
-}
-
-// Enabled reports whether outboundType is covered: a mode other than off and
-// the type in outbound_type.
-func (r LXQUICSniffDecoyResolved) Enabled(outboundType string) bool {
-	return r.Mode != "" && r.Mode != LXQUICSniffDecoyOff && slices.Contains(r.OutboundTypes, outboundType)
-}
-
-// DetourMatches reports whether a relay of detourType is in detour_type.
-func (r LXQUICSniffDecoyResolved) DetourMatches(detourType string) bool {
-	return detourType != "" && slices.Contains(r.DetourTypes, detourType)
-}
-
+// LXWGResolved keeps the field names of the flat layout for the idle values,
+// so the router and endpoints did not change with the move to lx.wg.idle.
 type LXWGResolved struct {
 	IdleSuspend          time.Duration
 	IdleSuspendReachable time.Duration
 	// IdleTeardown is the effective level-3 window: the explicit value, or
 	// IdleSuspendReachable when the key is absent. An explicit "0" stays 0.
 	IdleTeardown time.Duration
-	// IdleTeardownSet records that idle_teardown was present, which an
+	// IdleTeardownSet records that lx.wg.idle.teardown was present, which an
 	// explicit "0" makes indistinguishable from absent in IdleTeardown alone.
 	IdleTeardownSet bool
 	LazyBuild       bool
 	BuildMax        int
 	BuildOverflow   LXBuildOverflow
+	// ReadDatagramCount is 128 when lx.wg.buffers.read_datagram_count is absent.
+	ReadDatagramCount int
+	// SendFullSize is lx.wg.buffers.send_by_mtu set to false. It is the
+	// inverse of the key so that the zero value is the default behaviour.
+	SendFullSize    bool
+	ConnectedSocket bool
+}
+
+// lxWGDefaults is the WG part of an absent block: the idle keys off, the
+// buffer keys at the upstream behaviour.
+func lxWGDefaults() LXWGResolved {
+	return LXWGResolved{ReadDatagramCount: lxWGReadDatagramCountMax}
 }
 
 type LXMASQUEResolved struct {
@@ -333,10 +359,11 @@ type LXMTUAlignResolved struct {
 	Except []string
 }
 
-// WGOrZero returns the WG values, or all-off when r is nil.
+// WGOrZero returns the WG values, or the defaults when r is nil: the idle
+// keys off, the buffer keys at their non-zero defaults.
 func (r *LXResolved) WGOrZero() LXWGResolved {
 	if r == nil {
-		return LXWGResolved{}
+		return lxWGDefaults()
 	}
 	return r.WG
 }
@@ -355,45 +382,6 @@ func (r *LXResolved) TrustTunnelOrZero() LXTrustTunnelResolved {
 		return LXTrustTunnelResolved{}
 	}
 	return r.TrustTunnel
-}
-
-// QUICSniffDecoyOrOff returns the resolved lx.quic_sniff_decoy, or the
-// all-off policy when r is nil.
-func (r *LXResolved) QUICSniffDecoyOrOff() LXQUICSniffDecoyResolved {
-	if r == nil {
-		return resolveLXQUICSniffDecoy(nil)
-	}
-	return r.QUICSniffDecoy
-}
-
-// resolveLXQUICSniffDecoy applies the defaults; a nil key is mode off.
-func resolveLXQUICSniffDecoy(o *LXQUICSniffDecoyOptions) LXQUICSniffDecoyResolved {
-	resolved := LXQUICSniffDecoyResolved{
-		Mode:          LXQUICSniffDecoyOff,
-		OutboundTypes: lxQUICSniffDecoyDefaultOutboundTypes,
-		DetourTypes:   lxQUICSniffDecoyDefaultDetourTypes,
-		Retry:         true,
-	}
-	if o == nil {
-		return resolved
-	}
-	if o.Mode != "" {
-		resolved.Mode = o.Mode
-	}
-	if len(o.OutboundType) > 0 {
-		resolved.OutboundTypes = append([]string(nil), o.OutboundType...)
-	}
-	if len(o.DetourType) > 0 {
-		resolved.DetourTypes = append([]string(nil), o.DetourType...)
-	}
-	resolved.Retry = o.Send != LXQUICSniffDecoySendAlways
-	return resolved
-}
-
-// isDefault reports whether the object says nothing an absent key would not:
-// mode off or unset, no lists, send unset or retry.
-func (o *LXQUICSniffDecoyOptions) isDefault() bool {
-	return o == nil || (o.Mode == "" || o.Mode == LXQUICSniffDecoyOff) && len(o.OutboundType) == 0 && len(o.DetourType) == 0 && (o.Send == "" || o.Send == LXQUICSniffDecoySendRetry)
 }
 
 // MTUAlignOrDefault returns the mtu_align policy, or the default (clamp,
@@ -426,22 +414,18 @@ func ResolveLX(options *Options) (*LXResolved, error) {
 	if err != nil {
 		return nil, err
 	}
-	if lx.QUICSniffDecoy != nil {
-		if err := lx.QUICSniffDecoy.validate(); err != nil {
+	lx.AWGMasquerade = nil
+	lx.QUICSniffDecoy = nil
+	wg = canonicalLXWG(wg)
+	// lx:begin SPEC 060
+	if lx.SniffGuard != nil {
+		if err := lx.SniffGuard.validate(); err != nil {
 			return nil, err
 		}
 	}
-	resolved.QUICSniffDecoy = resolveLXQUICSniffDecoy(lx.QUICSniffDecoy)
-	if lx.QUICSniffDecoy.isDefault() {
-		lx.QUICSniffDecoy = nil
-	} else {
-		decoy := *lx.QUICSniffDecoy
-		if decoy.Send == LXQUICSniffDecoySendRetry {
-			decoy.Send = ""
-		}
-		lx.QUICSniffDecoy = &decoy
-	}
-	lx.AWGMasquerade = nil
+	resolved.SniffGuard = resolveLXSniffGuard(lx.SniffGuard)
+	lx.SniffGuard = lx.SniffGuard.canonical()
+	// lx:end SPEC 060
 
 	if wg != (LXWGOptions{}) {
 		lx.WG = &wg
@@ -457,7 +441,8 @@ func ResolveLX(options *Options) (*LXResolved, error) {
 	if lx.MTUAlign != nil && lx.MTUAlign.Mode == "" && len(lx.MTUAlign.Except) == 0 {
 		lx.MTUAlign = nil
 	}
-	if lx.WG == nil && lx.MASQUE == nil && lx.TrustTunnel == nil && lx.MTUAlign == nil && lx.QUICSniffDecoy == nil {
+	if lx.WG == nil && lx.MASQUE == nil && lx.TrustTunnel == nil && lx.MTUAlign == nil &&
+		lx.SniffGuard == nil { // lx: SPEC 060
 		options.LX = nil
 	} else {
 		options.LX = &lx
@@ -484,50 +469,67 @@ func resolveLXValues(wg LXWGOptions, masque *LXMASQUEOptions, trustTunnel *LXTru
 			resolved.MTUAlign.Except = append([]string(nil), mtuAlign.Except...)
 		}
 	}
-	if wg.IdleSuspend < 0 {
-		return nil, E.New("lx.wg.idle_suspend must be >= 0")
+	resolved.WG = lxWGDefaults()
+	var idle LXWGIdleOptions
+	if wg.Idle != nil {
+		idle = *wg.Idle
 	}
-	if wg.IdleSuspendReachable < 0 {
-		return nil, E.New("lx.wg.idle_suspend_reachable must be >= 0")
+	if idle.Suspend < 0 {
+		return nil, E.New("lx.wg.idle.suspend must be >= 0")
 	}
-	if wg.IdleTeardown != nil && *wg.IdleTeardown < 0 {
-		return nil, E.New("lx.wg.idle_teardown must be >= 0")
+	if idle.SuspendReachable < 0 {
+		return nil, E.New("lx.wg.idle.suspend_reachable must be >= 0")
 	}
-	if wg.IdleSuspend == 0 {
-		if wg.IdleSuspendReachable > 0 {
-			return nil, E.New("lx.wg.idle_suspend_reachable requires lx.wg.idle_suspend")
+	if idle.Teardown != nil && *idle.Teardown < 0 {
+		return nil, E.New("lx.wg.idle.teardown must be >= 0")
+	}
+	if idle.Suspend == 0 {
+		if idle.SuspendReachable > 0 {
+			return nil, E.New("lx.wg.idle.suspend_reachable requires lx.wg.idle.suspend")
 		}
-		if wg.IdleTeardown != nil {
-			return nil, E.New("lx.wg.idle_teardown requires lx.wg.idle_suspend")
+		if idle.Teardown != nil {
+			return nil, E.New("lx.wg.idle.teardown requires lx.wg.idle.suspend")
 		}
-		if wg.LazyBuild {
-			return nil, E.New("lx.wg.lazy_build requires lx.wg.idle_suspend")
+		if idle.LazyBuild {
+			return nil, E.New("lx.wg.idle.lazy_build requires lx.wg.idle.suspend")
 		}
 	}
-	if wg.IdleSuspendReachable > 0 && wg.IdleSuspendReachable < wg.IdleSuspend {
-		return nil, E.New("lx.wg.idle_suspend_reachable must be >= lx.wg.idle_suspend")
+	if idle.SuspendReachable > 0 && idle.SuspendReachable < idle.Suspend {
+		return nil, E.New("lx.wg.idle.suspend_reachable must be >= lx.wg.idle.suspend")
 	}
-	if wg.BuildMax < 0 {
-		return nil, E.New("lx.wg.build_max must be >= 0")
+	if idle.BuildMax < 0 {
+		return nil, E.New("lx.wg.idle.build_max must be >= 0")
 	}
-	switch wg.BuildOverflow {
+	switch idle.BuildOverflow {
 	case "", "wait":
 		resolved.WG.BuildOverflow = LXBuildOverflowWait
 	case "build":
 		resolved.WG.BuildOverflow = LXBuildOverflowBuild
 	default:
-		return nil, E.New(`lx.wg.build_overflow must be "wait" or "build"`)
+		return nil, E.New(`lx.wg.idle.build_overflow must be "wait" or "build"`)
 	}
-	resolved.WG.IdleSuspend = time.Duration(wg.IdleSuspend)
-	resolved.WG.IdleSuspendReachable = time.Duration(wg.IdleSuspendReachable)
-	if wg.IdleTeardown != nil {
-		resolved.WG.IdleTeardown = time.Duration(*wg.IdleTeardown)
+	resolved.WG.IdleSuspend = time.Duration(idle.Suspend)
+	resolved.WG.IdleSuspendReachable = time.Duration(idle.SuspendReachable)
+	if idle.Teardown != nil {
+		resolved.WG.IdleTeardown = time.Duration(*idle.Teardown)
 		resolved.WG.IdleTeardownSet = true
 	} else {
-		resolved.WG.IdleTeardown = time.Duration(wg.IdleSuspendReachable)
+		resolved.WG.IdleTeardown = time.Duration(idle.SuspendReachable)
 	}
-	resolved.WG.LazyBuild = wg.LazyBuild
-	resolved.WG.BuildMax = wg.BuildMax
+	resolved.WG.LazyBuild = idle.LazyBuild
+	resolved.WG.BuildMax = idle.BuildMax
+	if wg.Buffers != nil {
+		if count := wg.Buffers.ReadDatagramCount; count != nil {
+			if *count < 1 || *count > lxWGReadDatagramCountMax {
+				return nil, E.New("lx.wg.buffers.read_datagram_count must be between 1 and 128")
+			}
+			resolved.WG.ReadDatagramCount = *count
+		}
+		if wg.Buffers.SendByMTU != nil {
+			resolved.WG.SendFullSize = !*wg.Buffers.SendByMTU
+		}
+	}
+	resolved.WG.ConnectedSocket = wg.ConnectedSocket
 	if masque != nil {
 		if masque.IdleTimeout < 0 {
 			return nil, E.New("lx.masque.idle_timeout must be >= 0")
@@ -541,4 +543,28 @@ func resolveLXValues(wg LXWGOptions, masque *LXMASQUEOptions, trustTunnel *LXTru
 		resolved.TrustTunnel.IdleTimeout = time.Duration(trustTunnel.IdleTimeout)
 	}
 	return &resolved, nil
+}
+
+// canonicalLXWG returns wg with fresh sub-block pointers, defaults written out
+// dropped and empty sub-blocks removed. It never writes through the caller's
+// pointers. The moved-key guards are dropped like the removed root keys.
+func canonicalLXWG(wg LXWGOptions) LXWGOptions {
+	canonical := LXWGOptions{ConnectedSocket: wg.ConnectedSocket}
+	if wg.Idle != nil && *wg.Idle != (LXWGIdleOptions{}) {
+		idle := *wg.Idle
+		canonical.Idle = &idle
+	}
+	if wg.Buffers != nil {
+		buffers := *wg.Buffers
+		if buffers.ReadDatagramCount != nil && *buffers.ReadDatagramCount == lxWGReadDatagramCountMax {
+			buffers.ReadDatagramCount = nil
+		}
+		if buffers.SendByMTU != nil && *buffers.SendByMTU {
+			buffers.SendByMTU = nil
+		}
+		if buffers != (LXWGBuffersOptions{}) {
+			canonical.Buffers = &buffers
+		}
+	}
+	return canonical
 }
