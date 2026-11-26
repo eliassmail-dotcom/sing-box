@@ -10,9 +10,10 @@ import (
 // Length is a TLS record payload length (bytes), not a TCP segment size.
 // Zero delay merges the records into a single underlying write.
 type LXFinalMaskFragmentOptions struct {
-	Packets string `json:"packets"`
-	Length  string `json:"length"`
-	Delay   string `json:"delay"`
+	Packets  string `json:"packets"`
+	Length   string `json:"length"`
+	Delay    string `json:"delay"`
+	MaxSplit string `json:"max_split,omitempty"`
 }
 
 func (o *LXFinalMaskFragmentOptions) Bounds() (int, int, error) {
@@ -39,4 +40,34 @@ func (o *LXFinalMaskFragmentOptions) Bounds() (int, int, error) {
 	}
 	return lo, hi, nil
 }
-func (o *LXFinalMaskFragmentOptions) Validate() error { _, _, err := o.Bounds(); return err }
+// MaxSplitBounds returns the optional cap on the number of TLS records.
+// Zero means unlimited, preserving the original behavior.
+func (o *LXFinalMaskFragmentOptions) MaxSplitBounds() (int, int, error) {
+	if o == nil || o.MaxSplit == "" {
+		return 0, 0, nil
+	}
+	parts := strings.Split(o.MaxSplit, "-")
+	if len(parts) > 2 {
+		return 0, 0, fmt.Errorf("invalid finalmask_fragment max_split")
+	}
+	lo, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid finalmask_fragment max_split")
+	}
+	hi := lo
+	if len(parts) == 2 {
+		hi, err = strconv.Atoi(parts[1])
+	}
+	if err != nil || lo < 0 || hi < lo || hi > 16384 {
+		return 0, 0, fmt.Errorf("invalid finalmask_fragment max_split bounds")
+	}
+	return lo, hi, nil
+}
+
+func (o *LXFinalMaskFragmentOptions) Validate() error {
+	if _, _, err := o.Bounds(); err != nil {
+		return err
+	}
+	_, _, err := o.MaxSplitBounds()
+	return err
+}
