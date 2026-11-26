@@ -65,7 +65,7 @@ jobs:
               packages=(./common/dialer/ ./common/urltest/ ./common/lxsniffguard/ ./common/lxdatagram/ ./common/tls/ ./protocol/group/)
               ;;
             routing)
-              packages=(./option/ ./route/... ./dns/... ./protocol/chain/ ./protocol/dns/ ./protocol/http/ ./experimental/libbox/)
+              packages=(./option/ ./route/... ./dns/... ./protocol/chain/ ./protocol/dns/ ./protocol/http/)
               ;;
             transports)
               packages=(./protocol/vless/ ./transport/v2rayquic/ ./transport/v2rayxhttp/ ./protocol/hysteria2/ ./protocol/tuic/)
@@ -75,6 +75,11 @@ jobs:
               ;;
           esac
           go test -race -count=1 -timeout=15m -ldflags '-checklinkname=0' -tags "$LX_TEST_TAGS" "${packages[@]}"
+      # Match the existing Linux lx-ci BASE_TAGS for libbox. Static Cronet
+      # is not linkable by the hosted Linux gcc/ld in this Apple-tag test.
+      - name: Linux libbox regression (purego)
+        if: matrix.suite == 'routing'
+        run: go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' -tags "$LX_TEST_TAGS with_purego" ./experimental/libbox/
       # As in the original b41 acceptance workflow, Vision's dependency
       # uses unsafe pointer arithmetic incompatible with checkptr under -race.
       # Keep the full package suite, but run this package without -race.
