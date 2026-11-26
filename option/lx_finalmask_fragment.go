@@ -8,13 +8,14 @@ import (
 
 // LXFinalMaskFragmentOptions is the supported Xray FinalMask tlshello subset.
 // Length is a TLS record payload length (bytes), not a TCP segment size.
-// Zero delay merges the records into a single underlying write.
+// A single zero delay merges the records into one underlying write.
 type LXFinalMaskFragmentOptions struct {
-	Packets  string `json:"packets"`
+	Packets  string   `json:"packets"`
 	Length   string   `json:"length,omitempty"`
 	Lengths  []string `json:"lengths,omitempty"`
-	Delay    string `json:"delay"`
-	MaxSplit string `json:"max_split,omitempty"`
+	Delay    string   `json:"delay,omitempty"`
+	Delays   []string `json:"delays,omitempty"`
+	MaxSplit string   `json:"max_split,omitempty"`
 }
 
 // LXFinalMaskLengthRange describes a TLS record payload length in bytes.
@@ -26,8 +27,8 @@ func (o *LXFinalMaskFragmentOptions) LengthRanges() ([]LXFinalMaskLengthRange, e
 	if o == nil {
 		return nil, nil
 	}
-	if o.Packets != "tlshello" || o.Delay != "0" {
-		return nil, fmt.Errorf("finalmask_fragment supports packets=tlshello and delay=0 only")
+	if o.Packets != "tlshello" {
+		return nil, fmt.Errorf("finalmask_fragment supports packets=tlshello only")
 	}
 	values := o.Lengths
 	if len(values) == 0 {
@@ -67,6 +68,45 @@ func (o *LXFinalMaskFragmentOptions) Bounds() (int, int, error) {
 	return ranges[0].Min, ranges[0].Max, nil
 }
 
+// DelayRanges returns ordered delay ranges in milliseconds. The last range
+// repeats. An omitted delay is equivalent to a single zero.
+func (o *LXFinalMaskFragmentOptions) DelayRanges() ([]LXFinalMaskLengthRange, error) {
+	if o == nil {
+		return nil, nil
+	}
+	values := o.Delays
+	if len(values) == 0 {
+		value := o.Delay
+		if value == "" {
+			value = "0"
+		}
+		values = []string{value}
+	}
+	if len(values) > 256 {
+		return nil, fmt.Errorf("finalmask_fragment supports at most 256 delay ranges")
+	}
+	ranges := make([]LXFinalMaskLengthRange, 0, len(values))
+	for _, value := range values {
+		parts := strings.Split(value, "-")
+		if len(parts) > 2 {
+			return nil, fmt.Errorf("invalid finalmask_fragment delay")
+		}
+		lo, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return nil, fmt.Errorf("invalid finalmask_fragment delay")
+		}
+		hi := lo
+		if len(parts) == 2 {
+			hi, err = strconv.Atoi(parts[1])
+		}
+		if err != nil || lo < 0 || hi < lo || hi > 5000 {
+			return nil, fmt.Errorf("invalid finalmask_fragment delay bounds (0-5000 ms)")
+		}
+		ranges = append(ranges, LXFinalMaskLengthRange{Min: lo, Max: hi})
+	}
+	return ranges, nil
+}
+
 // MaxSplitBounds returns the optional cap on the number of TLS records.
 // Zero means unlimited, preserving the original behavior.
 func (o *LXFinalMaskFragmentOptions) MaxSplitBounds() (int, int, error) {
@@ -93,6 +133,9 @@ func (o *LXFinalMaskFragmentOptions) MaxSplitBounds() (int, int, error) {
 
 func (o *LXFinalMaskFragmentOptions) Validate() error {
 	if _, _, err := o.Bounds(); err != nil {
+		return err
+	}
+	if _, err := o.DelayRanges(); err != nil {
 		return err
 	}
 	_, _, err := o.MaxSplitBounds()

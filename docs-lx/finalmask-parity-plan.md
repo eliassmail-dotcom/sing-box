@@ -6,14 +6,20 @@ Reference: Xray-core v26.11.9, transport/internet/finalmask/fragment/conn.go and
 
 ## Stage 1 — existing TLS record fragmentation
 
-- Existing finalmask_fragment remains opt-in, tlshello and zero delay only.
+- Existing finalmask_fragment remains opt-in, tlshello only.
 - Added optional max_split (integer or range encoded as a string). Omission or zero preserves unlimited splitting. A nonzero cap leaves the remaining payload in the last TLS record, preserving the original handshake and trailing bytes.
 - No change to default, IP Race, chain, or adaptive fragment selection. The existing mutually exclusive fragment selection is retained.
 - New regression tests cover range, cap, omission, invalid input and payload integrity. CI must pass before release.
 
+## Stage 2 — ordered length and delay ranges
+- lengths and delays arrays override their scalar values, with repeat-last semantics; only one zero delay range uses the merged-write path.
+- Explicit LX resource safeguards: up to 256 length/delay ranges, nonzero lengths only, at most 5000 ms worst-case total delay per ClientHello, rejected before writing. These limits are intentionally stricter than Xray.
+- Delay waits are interrupted by wrapper Close and write deadline updates; tests exercise both. Inherited deadlines set directly on an underlying connection before wrapping are not observable by the wrapper. Actual TLS cancellation still requires real-stack tests.
+- The raw TCP write-index modes, numeric JSON range inputs, upstream mask ordering and other masks remain unsupported. No generator changes yet.
+
 ## Remaining scope (not implemented)
 
-1. Verify pinned upstream parser, all fragment options, mask ordering and error semantics. Add length/delay sequences, numeric write ranges and delay handling only with cancellation/deadline and resource tests. Document deliberate divergences from Xray (including zero-length TLS records and incomplete initial writes).
+1. Verify pinned upstream parser, all fragment options, mask ordering and error semantics. Finish numeric write ranges and raw transport integration; verify full-stack cancellation and resource tests. Document deliberate divergences from Xray (including zero-length TLS records and incomplete initial writes).
 2. Establish a shared transport-layer mask interface, audit TCP/UDP insertion points and detour handling. Do not layer masks twice or move TLS wrapping across the wrong hop.
 3. Evaluate other TCP and UDP mask implementations, and QUIC parameters against actual library capabilities; port individual supported masks with upstream interoperability tests, licensing notices and explicit rejection of unsupported options.
 4. Update generator import only after core contracts stabilize; add fixture-based checks and backward compatibility for finalmask=true.
