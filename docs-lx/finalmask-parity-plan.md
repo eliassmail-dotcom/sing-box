@@ -128,3 +128,7 @@ References:
 ## Stage 18 — XDNS record types
 
 A, AAAA, CNAME and TXT are accepted, with a random configured type chosen per datagram, correct client-ID type bits and matching pending query type. Indexed responses tolerate reordering and reject missing or duplicate records; A/AAAA permit only bounded zero padding. The default remains TXT. A and AAAA response capacity is substantially smaller than TXT; A-only cannot carry a normal QUIC Initial response at the supported EDNS limit. Codec tests are not proof that all query-type combinations support a working QUIC session. TCP/DoH and multiple resolvers remain unsupported.
+
+## Stage 19 — XDNS TCP carrier
+
+Single explicit literal-IP UDP or TCP resolver, chosen through the same outbound dialer. TCP uses RFC 1035 two-byte big-endian DNS length framing, handles fragmented/coalesced stream reads and partial writes, caps frames at 4096 bytes, closes on framing/stream errors, and exposes UDP address semantics to QUIC. Existing XDNS workers/queues are reused. No transparent TCP reconnect: failed carrier terminates and the outer transport must redial. Tests cover framing, malformed lengths, default UDP path and a real local TCP XDNS exchange. DoH and multi-resolver failover remain unsupported. External Xray and actual QUIC-over-XDNS TCP interoperability remain unverified.

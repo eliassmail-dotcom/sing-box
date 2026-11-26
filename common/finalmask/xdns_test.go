@@ -55,7 +55,7 @@ func TestLXFinalMaskXDNSReference(t *testing.T){
 func TestLXFinalMaskXDNSValidation(t *testing.T){
 	for _,s:=range []string{
 		strings.Replace(xdnsTestConfig,"4096","512",1),
-		strings.Replace(xdnsTestConfig,"udp://","tcp://",1),
+		strings.Replace(xdnsTestConfig,"udp://","tls://",1),
 		strings.Replace(xdnsTestConfig,"127.0.0.1","resolver.test",1),
 		strings.Replace(xdnsTestConfig,"unit.test","unit..test",1),
 		strings.Replace(xdnsTestConfig,"\"edns0\":4096","\"edns0\":4096,\"types\":[99]",1),

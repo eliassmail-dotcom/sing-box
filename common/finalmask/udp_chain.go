@@ -83,7 +83,10 @@ func(c *UDPChain) WrapConnected(raw net.Conn)net.Conn{
 	conn:=raw
 	for i:=len(c.masks)-1;i>=0;i--{
 		m:=c.masks[i]
-		if m.xdns!=nil{conn=newXDNSConn(conn,m.xdns);continue}
+		if m.xdns!=nil{
+			if m.xdns.network=="tcp"{conn=newXDNSTCPConn(conn)}
+			conn=newXDNSConn(conn,m.xdns);continue
+		}
 		if m.legacy!=nil{conn=&udpLegacyConn{Conn:conn,config:m.legacy};continue}
 		if m.sudoku!=nil{conn=m.sudoku.WrapUDP(conn);continue}
 		if m.noise!=nil{conn=newUDPNoiseConn(conn,m.noise);continue}
@@ -148,4 +151,10 @@ func(c *UDPChain)DialDestination(server M.Socksaddr)M.Socksaddr{
 }
 func(c *UDPChain)ReplacesCarrier()bool{
 	return c!=nil&&len(c.masks)==1&&c.masks[0].xdns!=nil
+}
+
+// DialNetwork is the underlying carrier protocol, not the QUIC protocol.
+func(c *UDPChain)DialNetwork()string{
+	if c.ReplacesCarrier(){return c.masks[0].xdns.network}
+	return "udp"
 }

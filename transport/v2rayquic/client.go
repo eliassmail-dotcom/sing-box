@@ -117,7 +117,7 @@ func (c *Client) offer() (*clientConnection, error) {
 }
 
 func (c *Client) offerNew() (*clientConnection, error) {
-	udpConn, err := c.dialer.DialContext(c.ctx, "udp", c.udpMask.DialDestination(c.serverAddr))
+	udpConn, err := c.dialer.DialContext(c.ctx, c.udpMask.DialNetwork(), c.udpMask.DialDestination(c.serverAddr))
 	if err != nil {
 		return nil, err
 	}

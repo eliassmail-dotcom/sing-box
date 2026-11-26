@@ -25,6 +25,7 @@ var xdnsBase32=base32.StdEncoding.WithPadding(base32.NoPadding)
 
 type xdnsConfig struct{
 	resolver M.Socksaddr
+	network string
 	domain string
 	types []dnsmessage.Type
 	labelLimit,capacity,edns,extraPoll int
@@ -46,7 +47,7 @@ func compileXDNS(raw json.RawMessage)(*xdnsConfig,error){
 		ExtraPoll int `json:"extraPoll"`
 	}
 	if err:=decodeMaskSettings(raw,&s);err!=nil{return nil,err}
-	if len(s.Domains)!=1||len(s.Domains[0].Names)!=1||len(s.Resolvers)!=1||len(s.Resolvers[0].Addrs)!=1{return nil,errors.New("XDNS pilot requires one domain and one UDP resolver")}
+	if len(s.Domains)!=1||len(s.Domains[0].Names)!=1||len(s.Resolvers)!=1||len(s.Resolvers[0].Addrs)!=1{return nil,errors.New("XDNS pilot requires one domain and one resolver")}
 	d,r:=s.Domains[0],s.Resolvers[0]
 	if len(d.Types)==0{d.Types=[]int{16}}
 	if len(d.Types)>4{return nil,errors.New("too many XDNS query types")}
@@ -63,7 +64,7 @@ func compileXDNS(raw json.RawMessage)(*xdnsConfig,error){
 	address:=r.Addrs[0]
 	if !strings.Contains(address,"://"){address="udp://"+address}
 	u,err:=url.Parse(address)
-	if err!=nil||u.Scheme!="udp"||u.User!=nil||u.Path!=""||u.RawQuery!=""||u.Fragment!=""{return nil,errors.New("XDNS requires a UDP resolver address")}
+	if err!=nil||(u.Scheme!="udp"&&u.Scheme!="tcp")||u.User!=nil||u.Path!=""||u.RawQuery!=""||u.Fragment!=""{return nil,errors.New("XDNS requires a UDP or TCP resolver address")}
 	ip,err:=netip.ParseAddr(u.Hostname())
 	if err!=nil||ip.Zone()!=""||ip.IsUnspecified(){return nil,errors.New("XDNS pilot requires a literal resolver IP")}
 	port:=u.Port()
@@ -88,7 +89,7 @@ func compileXDNS(raw json.RawMessage)(*xdnsConfig,error){
 		capacity=n
 	}
 	if capacity<32{return nil,errors.New("XDNS domain capacity too small")}
-	return &xdnsConfig{resolver:M.ParseSocksaddr(net.JoinHostPort(ip.String(),port)),domain:domain,types:types,labelLimit:d.LabelLimit,capacity:capacity,edns:d.EDNS,extraPoll:s.ExtraPoll},nil
+	return &xdnsConfig{resolver:M.ParseSocksaddr(net.JoinHostPort(ip.String(),port)),network:u.Scheme,domain:domain,types:types,labelLimit:d.LabelLimit,capacity:capacity,edns:d.EDNS,extraPoll:s.ExtraPoll},nil
 }
 
 func(c *xdnsConfig)name(data []byte)(dnsmessage.Name,error){
