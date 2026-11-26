@@ -28,8 +28,15 @@ Reference: Xray-core v26.11.9, transport/internet/finalmask/fragment/conn.go and
 
 - Supports Xray client/server round ordering, static byte array/string/hex/base64 packets, random bytes, random value ranges, and sending delays. A matching server is required.
 - Opt-in finalmask_tcp_header on plain VLESS. Eager bounded exchange after dialing, before encryption and payload; context cancellation closes failed connections. Existing dialer interfaces are untouched.
-- Intentionally rejects capture/reuse/transform, error sequences, simultaneous fragment+header masks, TLS/REALITY and other transports. These are not silently ignored. Limits: 16 KiB total header, 256 items/rounds and five-second handshake.
+- Intentionally rejects capture/reuse/transform, error sequences, simultaneous legacy fragment+header fields, TLS/REALITY and other transports. These are not silently ignored. Limits: 16 KiB total header, 256 items/rounds and five-second handshake.
 - Tests use a manual reference peer, not an actual Xray binary; upstream interoperability is still a release gate.
+
+## Stage 5 — ordered TCP mask chain pilot
+
+- finalmask_tcp accepts Xray-style ordered entries (type/settings) for fragment and header-custom; the first entry is outermost, constructed in reverse as Xray does. Tests distinguish which bytes a first-write fragment actually sees.
+- Supports numeric and string fragment range forms, maxSplit and legacy max_split aliases (not simultaneously), strict rejection of unknown settings. Existing single-mask fields continue unchanged and cannot be combined with the list.
+- Limited to plain VLESS, at most one instance of each mask to avoid multiplicative write budgets. Header exchange remains eager; no upstream binary interop claim. Unsupported masks fail explicitly.
+- Both VLESS dial paths apply the ordered chain before protocol encryption. A failure closes the connection, including previously applied wrappers.
 
 ## Remaining scope (not implemented)
 
