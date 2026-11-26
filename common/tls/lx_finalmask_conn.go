@@ -2,23 +2,26 @@ package tls
 
 import (
 	"encoding/binary"
-	"github.com/sagernet/sing-box/option"
 	"io"
 	"math/rand"
 	"net"
+
+	"github.com/sagernet/sing-box/option"
 )
 
 // Only the first complete ClientHello record is transformed. The handshake
 // payload and any following records remain byte-for-byte intact.
 type lxFinalMaskConn struct {
 	net.Conn
-	lo, hi  int
-	written bool
+	lo, hi           int
+	maxLo, maxHi     int
+	written          bool
 }
 
 func newLXFinalMaskConn(c net.Conn, o *option.LXFinalMaskFragmentOptions) net.Conn {
 	lo, hi, _ := o.Bounds() // validated before config construction
-	return &lxFinalMaskConn{Conn: c, lo: lo, hi: hi}
+	maxLo, maxHi, _ := o.MaxSplitBounds()
+	return &lxFinalMaskConn{Conn: c, lo: lo, hi: hi, maxLo: maxLo, maxHi: maxHi}
 }
 func (c *lxFinalMaskConn) Write(p []byte) (int, error) {
 	if len(p) == 0 || c.written {
@@ -33,13 +36,21 @@ func (c *lxFinalMaskConn) Write(p []byte) (int, error) {
 		return c.Conn.Write(p)
 	}
 	data := p[5 : 5+n]
-	out := make([]byte, 0, len(p)+5*((n+c.lo-1)/c.lo))
-	for len(data) > 0 {
+	maxRecords := c.maxLo
+	if c.maxHi > c.maxLo {
+		maxRecords += rand.Intn(c.maxHi - c.maxLo + 1)
+	}
+	recordCapacity := (n + c.lo - 1) / c.lo
+	if maxRecords > 0 && recordCapacity > maxRecords {
+		recordCapacity = maxRecords
+	}
+	out := make([]byte, 0, len(p)+5*recordCapacity)
+	for index := 0; len(data) > 0; index++ {
 		size := c.lo
 		if c.hi > c.lo {
 			size += rand.Intn(c.hi - c.lo + 1)
 		}
-		if size > len(data) {
+		if size > len(data) || (maxRecords > 0 && index+1 >= maxRecords) {
 			size = len(data)
 		}
 		out = append(out, p[:3]...)
