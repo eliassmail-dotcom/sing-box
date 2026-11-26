@@ -76,3 +76,14 @@ func TestLXFinalMaskXDNSDoHRejectTLSAndOversize(t *testing.T){
 	c.transport.TLSClientConfig.RootCAs=roots
 	if _,err:=c.exchange(make([]byte,12));err==nil{t.Fatal("oversized response accepted")}
 }
+
+func TestLXFinalMaskXDNSDoH3Validation(t *testing.T){
+	raw:=strings.Replace(xdnsTestConfig,"udp://127.0.0.1:5353","https://127.0.0.1/dns-query",1)
+	raw=strings.Replace(raw,`"addrs":[`,`"tlsConfig":{"alpn":["h3"]},"addrs":[`,1)
+	cfg,err:=compileXDNS(json.RawMessage(raw))
+	if xdnsDoH3Available{
+		if err!=nil||!cfg.dohH3{t.Fatalf("valid h3 rejected %v",err)}
+	}else if err==nil{t.Fatal("h3 accepted without QUIC")}
+	raw=strings.Replace(raw,`["h3"]`,`["h3","h2"]`,1)
+	if _,err:=compileXDNS(json.RawMessage(raw));err==nil{t.Fatal("mixed h3 accepted")}
+}

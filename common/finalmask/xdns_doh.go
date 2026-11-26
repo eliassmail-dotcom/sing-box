@@ -24,6 +24,8 @@ type xdnsDoHConn struct{
 	cancel context.CancelFunc
 	client *http.Client
 	transport *http.Transport
+	tlsConfig *tls.Config
+	closeTransport func()
 	cfg *xdnsConfig
 	send,receive chan []byte
 	start,closeOnce sync.Once
@@ -35,12 +37,19 @@ type xdnsDoHConn struct{
 
 func newXDNSDoHConn(ctx context.Context,dialer N.Dialer,cfg *xdnsConfig)*xdnsDoHConn{
 	ctx,cancel:=context.WithCancel(context.WithoutCancel(ctx))
+	tlsConfig:=&tls.Config{ServerName:cfg.dohServerName,MinVersion:tls.VersionTLS12,NextProtos:cfg.dohALPN}
+	if cfg.dohH3{
+		rt,closeRT:=newXDNSDoH3Transport(dialer,cfg,tlsConfig)
+		return &xdnsDoHConn{ctx:ctx,cancel:cancel,cfg:cfg,tlsConfig:tlsConfig,closeTransport:closeRT,
+			client:&http.Client{Transport:rt,Timeout:xdnsDoHTimeout,CheckRedirect:func(*http.Request,[]*http.Request)error{return http.ErrUseLastResponse}},
+			send:make(chan []byte,xdnsDoHQueue),receive:make(chan []byte,xdnsDoHQueue),changed:make(chan struct{})}
+	}
 	tr:=&http.Transport{
 		Proxy:nil,
 		DialContext:func(ctx context.Context,network,address string)(net.Conn,error){
 			return dialer.DialContext(ctx,"tcp",cfg.resolver)
 		},
-		TLSClientConfig:&tls.Config{ServerName:cfg.dohServerName,MinVersion:tls.VersionTLS12,NextProtos:cfg.dohALPN},
+		TLSClientConfig:tlsConfig,
 		ForceAttemptHTTP2:true,
 		DisableCompression:true,
 		MaxConnsPerHost:cfg.dohWorkers,
@@ -55,7 +64,7 @@ func newXDNSDoHConn(ctx context.Context,dialer N.Dialer,cfg *xdnsConfig)*xdnsDoH
 		tr.ForceAttemptHTTP2=false
 		tr.TLSNextProto=map[string]func(string,*tls.Conn)http.RoundTripper{}
 	}
-	return &xdnsDoHConn{ctx:ctx,cancel:cancel,cfg:cfg,transport:tr,
+	return &xdnsDoHConn{ctx:ctx,cancel:cancel,cfg:cfg,transport:tr,tlsConfig:tlsConfig,closeTransport:tr.CloseIdleConnections,
 		client:&http.Client{Transport:tr,Timeout:xdnsDoHTimeout,CheckRedirect:func(*http.Request,[]*http.Request)error{return http.ErrUseLastResponse}},
 		send:make(chan []byte,xdnsDoHQueue),receive:make(chan []byte,xdnsDoHQueue),changed:make(chan struct{})}
 }
@@ -97,7 +106,7 @@ func(c *xdnsDoHConn)exchange(p []byte)([]byte,error){
 	return b,nil
 }
 func(c *xdnsDoHConn)Close()error{
-	c.closeOnce.Do(func(){c.cancel();c.transport.CloseIdleConnections()})
+	c.closeOnce.Do(func(){c.cancel();c.closeTransport()})
 	return nil
 }
 func(c *xdnsDoHConn)LocalAddr()net.Addr{return &net.UDPAddr{IP:net.IPv4zero}}

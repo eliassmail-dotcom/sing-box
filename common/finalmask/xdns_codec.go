@@ -30,6 +30,7 @@ type xdnsConfig struct{
 	dohURL, dohServerName string
 	dohWorkers int
 	dohALPN []string
+	dohH3 bool
 	domain string
 	types []dnsmessage.Type
 	labelLimit,capacity,edns,extraPoll int
@@ -138,7 +139,12 @@ func compileXDNSSingle(s xdnsSettings)(*xdnsConfig,error){
 		if r.TLS!=nil{
 			cfg.dohServerName=r.TLS.ServerName;cfg.dohALPN=r.TLS.ALPN
 			if len(cfg.dohALPN)>2{return nil,errors.New("invalid XDNS DoH ALPN")}
-			for _,v:=range cfg.dohALPN{if v!="h2"&&v!="http/1.1"{return nil,errors.New("XDNS DoH supports HTTP/1.1 and HTTP/2 only")}}
+			for _,v:=range cfg.dohALPN{
+				if v=="h3"{
+					if len(cfg.dohALPN)!=1||!xdnsDoH3Available{return nil,errors.New("XDNS DoH h3 requires exclusive h3 ALPN and with_quic build")}
+					cfg.dohH3=true
+				}else if v!="h2"&&v!="http/1.1"{return nil,errors.New("invalid XDNS DoH ALPN")}
+			}
 		}
 	}
 	return cfg,nil
