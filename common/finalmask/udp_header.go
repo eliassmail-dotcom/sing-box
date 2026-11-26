@@ -36,6 +36,7 @@ type udpHeaderJSON struct {
 type udpHeaderConfig struct {
 	client,server []headerItem
 	sendSize,receiveSize int
+	needsMetadata bool
 }
 
 func udpHeaderUsesMetadata(e *headerExpr)bool{
@@ -72,7 +73,10 @@ func compileUDPHeader(raw json.RawMessage)(*udpHeaderConfig,error){
 			size:=len(item.packet)+item.random
 			if item.reuse!=""{size=sizes[item.reuse]}
 			if item.transform!=nil{
-				if receiving&&udpHeaderUsesMetadata(item.transform){return 0,errors.New("UDP receive expressions cannot use socket metadata")}
+				if udpHeaderUsesMetadata(item.transform){
+					if receiving{return 0,errors.New("UDP receive expressions cannot use socket metadata")}
+					c.needsMetadata=true
+				}
 				size=item.transform.width
 			}
 			if item.capture!=""{sizes[item.capture]=size}
@@ -135,7 +139,8 @@ func(c *udpHeaderConn)Write(p []byte)(int,error){
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
 	vars:=c.snapshot()
-	metadata:=headerMetadata(c.Conn)
+	var metadata map[string]uint64
+	if c.config.needsMetadata{metadata=headerMetadata(c.Conn)}
 	wire:=c.wbuf[:0]
 	for _,item:=range c.config.client{
 		var b []byte
