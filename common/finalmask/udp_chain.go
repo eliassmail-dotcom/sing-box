@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/common/finalmask/sudoku"
 	"golang.org/x/crypto/blake2b"
 )
 
@@ -19,7 +20,7 @@ const (
 )
 
 type UDPChain struct { masks []udpMask }
-type udpMask struct { password []byte; geckoMin,geckoMax int; noise *udpNoiseConfig; header *udpHeaderConfig }
+type udpMask struct { password []byte; geckoMin,geckoMax int; noise *udpNoiseConfig; header *udpHeaderConfig; sudoku *sudoku.Mask }
 type salamanderSettings struct { Password string `json:"password"`; PacketSize json.RawMessage `json:"packetSize,omitempty"` }
 
 // NewUDPChain validates the supported client subset. Reject unsupported
@@ -42,6 +43,13 @@ func NewUDPChain(opts []option.LXFinalMaskUDPMaskOptions)(*UDPChain,error){
 			if err!=nil || (hi>0 && lo==0) {return nil,errors.New("finalmask_udp: invalid gecko packetSize")}
 			m.password=[]byte(settings.Password)
 			m.geckoMin,m.geckoMax=lo,hi
+		case "sudoku":
+			if len(opts)!=1{return nil,errors.New("UDP sudoku composition not validated")}
+			var settings sudoku.Config
+			if err:=decodeMaskSettings(o.Settings,&settings);err!=nil{return nil,err}
+			mask,err:=sudoku.New(&settings)
+			if err!=nil{return nil,fmt.Errorf("finalmask_udp[%d]: %w",i,err)}
+			m.sudoku=mask
 		case "header-custom":
 			cfg,err:=compileUDPHeader(o.Settings)
 			if err!=nil{return nil,fmt.Errorf("finalmask_udp[%d]: %w",i,err)}
@@ -64,6 +72,7 @@ func(c *UDPChain) WrapConnected(raw net.Conn)net.Conn{
 	conn:=raw
 	for i:=len(c.masks)-1;i>=0;i--{
 		m:=c.masks[i]
+		if m.sudoku!=nil{conn=m.sudoku.WrapUDP(conn);continue}
 		if m.noise!=nil{conn=newUDPNoiseConn(conn,m.noise);continue}
 		if m.header!=nil{
 			if m.header.standalone{conn=newUDPStandaloneConn(conn,m.header)}else{conn=&udpHeaderConn{Conn:conn,config:m.header}}

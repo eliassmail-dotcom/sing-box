@@ -94,6 +94,12 @@ Reference: Xray-core v26.11.9, transport/internet/finalmask/fragment/conn.go and
 - Single lazy read pump per connected socket; bounded eight-datagram payload queue drops overflow instead of blocking the handshake. Matching replies consumed internally. Close and write deadline interrupt handshake; recoverable read deadlines apply to the wrapper queue. Failure terminates the connection.
 - Standalone mask must be used alone until composition is validated. Nonempty request/reply required. Tests cover repeated exchange, concurrent read/write, deadline, queue saturation and configuration guards. External Xray interoperability, full IPA and resource measurements remain pending.
 
+## Stage 15 — UDP Sudoku
+
+- Classic hint encoding in both directions, matching the pinned Xray UDP codec, resetting table rotation and padding per datagram. Reuses immutable compiled tables and shared clue index from TCP Sudoku. No new background goroutine.
+- Mobile pilot limits input to 2048 bytes and encoded wire datagrams to 18433 bytes (maximum expansion 9x plus final pad). Oversized and malformed incoming datagrams are discarded; short output buffers drop datagrams as upstream does. Write errors are explicit.
+- Only standalone Sudoku mask is allowed initially: other UDP wrappers currently have smaller wire budgets. Large encoded packets may undergo IP fragmentation or be dropped by the network; actual path MTU and device resource tests are mandatory before use. Tests cover reference codec both directions, table reset, maximum padding, invalid hints, oversize, deadlines, and configuration guards.
+
 ## Remaining scope (not implemented)
 
 1. Verify pinned upstream parser, all fragment options, mask ordering and error semantics. Finish numeric write ranges and raw transport integration; verify full-stack cancellation and resource tests. Document deliberate divergences from Xray (including zero-length TLS records and incomplete initial writes).
