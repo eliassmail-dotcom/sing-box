@@ -13,15 +13,22 @@ import (
 // payload and any following records remain byte-for-byte intact.
 type lxFinalMaskConn struct {
 	net.Conn
-	lo, hi           int
-	maxLo, maxHi     int
-	written          bool
+	lengths      []option.LXFinalMaskLengthRange
+	minLength    int
+	maxLo, maxHi int
+	written      bool
 }
 
 func newLXFinalMaskConn(c net.Conn, o *option.LXFinalMaskFragmentOptions) net.Conn {
-	lo, hi, _ := o.Bounds() // validated before config construction
+	lengths, _ := o.LengthRanges() // validated before config construction
+	minLength := lengths[0].Min
+	for _, length := range lengths[1:] {
+		if length.Min < minLength {
+			minLength = length.Min
+		}
+	}
 	maxLo, maxHi, _ := o.MaxSplitBounds()
-	return &lxFinalMaskConn{Conn: c, lo: lo, hi: hi, maxLo: maxLo, maxHi: maxHi}
+	return &lxFinalMaskConn{Conn: c, lengths: lengths, minLength: minLength, maxLo: maxLo, maxHi: maxHi}
 }
 func (c *lxFinalMaskConn) Write(p []byte) (int, error) {
 	if len(p) == 0 || c.written {
@@ -40,15 +47,20 @@ func (c *lxFinalMaskConn) Write(p []byte) (int, error) {
 	if c.maxHi > c.maxLo {
 		maxRecords += rand.Intn(c.maxHi - c.maxLo + 1)
 	}
-	recordCapacity := (n + c.lo - 1) / c.lo
+	recordCapacity := (n + c.minLength - 1) / c.minLength
 	if maxRecords > 0 && recordCapacity > maxRecords {
 		recordCapacity = maxRecords
 	}
 	out := make([]byte, 0, len(p)+5*recordCapacity)
 	for index := 0; len(data) > 0; index++ {
-		size := c.lo
-		if c.hi > c.lo {
-			size += rand.Intn(c.hi - c.lo + 1)
+		rangeIndex := index
+		if rangeIndex >= len(c.lengths) {
+			rangeIndex = len(c.lengths) - 1
+		}
+		length := c.lengths[rangeIndex]
+		size := length.Min
+		if length.Max > length.Min {
+			size += rand.Intn(length.Max - length.Min + 1)
 		}
 		if size > len(data) || (maxRecords > 0 && index+1 >= maxRecords) {
 			size = len(data)
