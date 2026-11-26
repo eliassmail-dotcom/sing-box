@@ -4,6 +4,8 @@ package v2rayxhttp
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/json"
 	"crypto/sha256"
 	stdTLS "crypto/tls"
 	"crypto/x509"
@@ -24,6 +26,7 @@ import (
 	N "github.com/sagernet/sing/common/network"
 
 	"golang.org/x/net/http2"
+	"golang.org/x/crypto/blake2b"
 )
 
 func testCertificate(t *testing.T) (*stdTLS.Certificate, []byte) {
@@ -260,4 +263,95 @@ func TestHTTP3StreamOneRoundTrip(t *testing.T) {
 	if _, err := io.ReadFull(conn, buffer); err != nil || string(buffer) != "ping" {
 		t.Fatalf("echo = %q, %v", buffer, err)
 	}
+}
+
+// Reference peer deliberately implements the wire transform separately from
+// the client module. This tests real QUIC+TLS+HTTP/3 over masked UDP.
+type referenceSalamanderPeer struct{
+	net.PacketConn
+	password string
+}
+func(p *referenceSalamanderPeer)ReadFrom(b []byte)(int,net.Addr,error){
+	var frame [4097]byte
+	for{
+		n,addr,err:=p.PacketConn.ReadFrom(frame[:])
+		if err!=nil{return 0,addr,err}
+		if n<=8||n>4096{continue}
+		key:=blake2b.Sum256(append([]byte(p.password),frame[:8]...))
+		body:=frame[8:n]
+		for i:=range body{body[i]^=key[i%32]}
+		return copy(b,body),addr,nil
+	}
+}
+func(p *referenceSalamanderPeer)WriteTo(b []byte,addr net.Addr)(int,error){
+	frame:=make([]byte,len(b)+8)
+	if _,err:=rand.Read(frame[:8]);err!=nil{return 0,err}
+	key:=blake2b.Sum256(append([]byte(p.password),frame[:8]...))
+	for i,v:=range b{frame[8+i]=v^key[i%32]}
+	n,err:=p.PacketConn.WriteTo(frame,addr)
+	if err!=nil{return 0,err}
+	if n!=len(frame){return 0,io.ErrShortWrite}
+	return len(b),nil
+}
+
+func TestLXFinalMaskHTTP3StreamOneRoundTrip(t *testing.T) {
+	certificate, hash := testCertificate(t)
+	packetConn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http3.Server{
+		TLSConfig: http3.ConfigureTLSConfig(&stdTLS.Config{Certificates: []stdTLS.Certificate{*certificate}}),
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.(http.Flusher).Flush()
+			buffer := make([]byte, 4)
+			n, _ := io.ReadFull(r.Body, buffer)
+			w.Write(buffer[:n])
+			w.(http.Flusher).Flush()
+			io.Copy(io.Discard, r.Body)
+		}),
+	}
+	go server.Serve(&referenceSalamanderPeer{PacketConn: packetConn, password: "test-key"})
+	defer server.Close()
+
+	tlsConfig, err := tls.NewClient(context.Background(), log.NewNOPFactory().Logger(), "localhost", option.OutboundTLSOptions{
+		Enabled:                    true,
+		ServerName:                 "localhost",
+		ALPN:                       []string{"h3"},
+		CertificatePublicKeySHA256: [][]byte{hash},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport, err := NewClient(context.Background(), N.SystemDialer, M.SocksaddrFromNet(packetConn.LocalAddr()), option.V2RayXHTTPOptions{Mode: modeStreamOne, Path: "/xhttp/", FinalMaskUDP: []option.LXFinalMaskUDPMaskOptions{{Type:"salamander", Settings: json.RawMessage(`{"password":"test-key"}`)}}}, tlsConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := transport.(*Client)
+	defer client.Close()
+	if client.httpVersion != httpVersion3 {
+		t.Fatalf("version = %s", client.httpVersion)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, err := client.DialContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	buffer := make([]byte, 4)
+	if _, err := io.ReadFull(conn, buffer); err != nil || string(buffer) != "ping" {
+		t.Fatalf("echo = %q, %v", buffer, err)
+	}
+}
+
+func TestLXFinalMaskXHTTPRejectNonH3(t *testing.T){
+	_,err:=NewClient(context.Background(),N.SystemDialer,M.ParseSocksaddr("127.0.0.1:443"),option.V2RayXHTTPOptions{
+		Mode:modeStreamOne,FinalMaskUDP:[]option.LXFinalMaskUDPMaskOptions{{Type:"salamander",Settings:json.RawMessage(`{"password":"test-key"}`)}},
+	},testTLSConfig(t,"h2"))
+	if err==nil{t.Fatal("accepted UDP mask over HTTP/2")}
 }
