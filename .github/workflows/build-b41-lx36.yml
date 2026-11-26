@@ -1,10 +1,10 @@
-name: SFI LX++ b41 LX.36 migration
-run-name: "LX iOS | b41 F1-F3 + LX.36 | b42 diagnostics-fixes c02151c | regression gate"
+name: SFI LX++ b42 diagnostics
+run-name: "LX iOS | b42 + LX.36 | diagnostics 11d3a12 | regression gate"
 
 on:
   push:
     branches:
-      - build/b41-lx36-migration
+      - ci/b42-diagnostics
   workflow_dispatch:
 
 permissions:
@@ -102,8 +102,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin feat/diagnostics-b42
-          git -C clients/apple checkout --detach c02151cd436a98e3bd5aeccd98ada9a3dfb0c02d
-          test "$(git -C clients/apple rev-parse HEAD)" = "c02151cd436a98e3bd5aeccd98ada9a3dfb0c02d"
+          git -C clients/apple checkout --detach 11d3a128c5d97c90b40c11d7fe88cf774a7c847c
+          test "$(git -C clients/apple rev-parse HEAD)" = "11d3a128c5d97c90b40c11d7fe88cf774a7c847c"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
           for dep in utls wireguard-go sing-tun gvisor; do
@@ -111,14 +111,14 @@ jobs:
             test "$(git -C "submodules/$dep" rev-parse HEAD)" = "$(git rev-parse "HEAD:submodules/$dep")"
           done
 
-      - name: Bump complete iOS application and all extensions to build 41
+      - name: Bump complete iOS application and all extensions to build 42
         run: |-
           python3 - <<'PY'
           from pathlib import Path
           p = Path("clients/apple/sing-box.xcodeproj/project.pbxproj")
           t = p.read_text()
           assert t.count("CURRENT_PROJECT_VERSION = 33;") >= 2, "Unexpected b33 version baseline"
-          p.write_text(t.replace("CURRENT_PROJECT_VERSION = 33;", "CURRENT_PROJECT_VERSION = 41;"))
+          p.write_text(t.replace("CURRENT_PROJECT_VERSION = 33;", "CURRENT_PROJECT_VERSION = 42;"))
           assert "CURRENT_PROJECT_VERSION = 33;" not in p.read_text()
           PY
 
@@ -259,7 +259,7 @@ jobs:
         run: |-
           make lib_install
           export PATH="$PATH:$(go env GOPATH)/bin"
-          git tag v1.14.4-lx.36-b41 -f
+          git tag v1.14.4-lx.36-b42 -f
           go run ./cmd/internal/build_libbox -target apple -platform ios/arm64,iossimulator/arm64
           rm -rf clients/apple/Libbox.xcframework
           cp -R Libbox.xcframework clients/apple/Libbox.xcframework
@@ -314,14 +314,14 @@ jobs:
         id: package_ipa
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lxpp-v1.14.9-b41-lx36-F1-F3-unsigned.ipa
+          rm -rf Payload SFI-lxpp-v1.14.9-b42-lx36-diagnostics-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
           APP_INFO="Payload/sing-box.app/Info.plist"
           APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO")
           test "$APP_VERSION" = "1.14.9"
-          test "$APP_BUILD" = "41"
+          test "$APP_BUILD" = "42"
           echo "Packaging sing-box lx++ $APP_VERSION ($APP_BUILD)"
           # Cross-target build consistency is mandatory for sideloaded IPA.
           COUNT=0
@@ -344,7 +344,7 @@ jobs:
           {
             "product": "SFI LX++",
             "appVersion": "1.14.9",
-            "build": 41,
+            "build": 42,
             "appleCommit": "$(git -C .. rev-parse HEAD)",
             "coreCommit": "$(git -C ../../.. rev-parse HEAD)",
             "preparedCoreTree": "$(git -C ../../.. rev-parse HEAD^{tree})",
@@ -360,14 +360,14 @@ jobs:
             "simulatorRuntimeStatus": "see workflow XCTest evidence; not asserted at packaging"
           }
           EOF
-          zip -qry SFI-lxpp-v1.14.9-b41-lx36-F1-F3-unsigned.ipa Payload
-          test -s SFI-lxpp-v1.14.9-b41-lx36-F1-F3-unsigned.ipa
-          unzip -tq SFI-lxpp-v1.14.9-b41-lx36-F1-F3-unsigned.ipa
+          zip -qry SFI-lxpp-v1.14.9-b42-lx36-diagnostics-unsigned.ipa Payload
+          test -s SFI-lxpp-v1.14.9-b42-lx36-diagnostics-unsigned.ipa
+          unzip -tq SFI-lxpp-v1.14.9-b42-lx36-diagnostics-unsigned.ipa
           # Fail before publishing an IPA whose extension IDs, App Groups or
           # static File Provider Document Group are inconsistent. This does not
           # validate the signed identities that GBox chooses later.
-          python3 ../scripts/verify_unsigned_ipa.py SFI-lxpp-v1.14.9-b41-lx36-F1-F3-unsigned.ipa --build 41 | tee signing-preflight.json
-          ls -lh SFI-lxpp-v1.14.9-b41-lx36-F1-F3-unsigned.ipa
+          python3 ../scripts/verify_unsigned_ipa.py SFI-lxpp-v1.14.9-b42-lx36-diagnostics-unsigned.ipa --build 42 | tee signing-preflight.json
+          ls -lh SFI-lxpp-v1.14.9-b42-lx36-diagnostics-unsigned.ipa
 
       # The IPA can be built even if Apple's hosted simulator is unavailable,
       # but such an artifact must never appear as a VERIFIED release.
@@ -412,7 +412,7 @@ jobs:
         if: ${{ always() && steps.simulator_tests.outcome != 'skipped' }}
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lx-b41-lx36-xctest-evidence
+          name: SFI-lx-b42-lx36-xctest-evidence
           path: |
             clients/apple/build/LXTests.xcresult
             clients/apple/build/XCTestSummary.json
@@ -424,9 +424,9 @@ jobs:
         if: ${{ success() && steps.package_ipa.outcome == 'success' && steps.simulator_tests.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lxpp-v1.14.9-b41-lx36-F1-F3-XCTEST-PASSED-unsigned-ipa
+          name: SFI-lxpp-v1.14.9-b42-lx36-diagnostics-XCTEST-PASSED-unsigned-ipa
           path: |
-            clients/apple/build/SFI-lxpp-v1.14.9-b41-lx36-F1-F3-unsigned.ipa
+            clients/apple/build/SFI-lxpp-v1.14.9-b42-lx36-diagnostics-unsigned.ipa
             clients/apple/scripts/prepare_ipa_for_signer.py
             clients/apple/RELEASE_NOTES_B33.md
           compression-level: 1
