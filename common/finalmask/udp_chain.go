@@ -19,14 +19,14 @@ const (
 )
 
 type UDPChain struct { masks []udpMask }
-type udpMask struct { password []byte; geckoMin,geckoMax int; noise *udpNoiseConfig }
+type udpMask struct { password []byte; geckoMin,geckoMax int; noise *udpNoiseConfig; header *udpHeaderConfig }
 type salamanderSettings struct { Password string `json:"password"`; PacketSize json.RawMessage `json:"packetSize,omitempty"` }
 
 // NewUDPChain validates the supported client subset. Reject unsupported
 // variants rather than silently connecting without a required server mask.
 func NewUDPChain(opts []option.LXFinalMaskUDPMaskOptions)(*UDPChain,error){
 	if len(opts)==0{return nil,nil}
-	if len(opts)>2{return nil,errors.New("finalmask_udp: at most two masks")}
+	if len(opts)>3{return nil,errors.New("finalmask_udp: at most three masks")}
 	c:=&UDPChain{}
 	seen:=make(map[string]bool)
 	for i,o:=range opts{
@@ -42,6 +42,10 @@ func NewUDPChain(opts []option.LXFinalMaskUDPMaskOptions)(*UDPChain,error){
 			if err!=nil || (hi>0 && lo==0) {return nil,errors.New("finalmask_udp: invalid gecko packetSize")}
 			m.password=[]byte(settings.Password)
 			m.geckoMin,m.geckoMax=lo,hi
+		case "header-custom":
+			cfg,err:=compileUDPHeader(o.Settings)
+			if err!=nil{return nil,fmt.Errorf("finalmask_udp[%d]: %w",i,err)}
+			m.header=cfg
 		case "noise":
 			cfg,err:=compileUDPNoise(o.Settings)
 			if err!=nil{return nil,fmt.Errorf("finalmask_udp[%d]: %w",i,err)}
@@ -60,6 +64,7 @@ func(c *UDPChain) WrapConnected(raw net.Conn)net.Conn{
 	for i:=len(c.masks)-1;i>=0;i--{
 		m:=c.masks[i]
 		if m.noise!=nil{conn=newUDPNoiseConn(conn,m.noise);continue}
+		if m.header!=nil{conn=&udpHeaderConn{Conn:conn,config:m.header};continue}
 		conn=&salamanderUDPConn{Conn:conn,password:m.password}
 		if m.geckoMax>0{conn=&geckoUDPConn{Conn:conn,minPkt:m.geckoMin,maxPkt:m.geckoMax}}
 	}

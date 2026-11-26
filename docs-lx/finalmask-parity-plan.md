@@ -82,6 +82,12 @@ Reference: Xray-core v26.11.9, transport/internet/finalmask/fragment/conn.go and
 - Limits: 16 items, 1200 bytes per noise datagram, 8192-byte burst, one second total configured delay, reset at most 86400 seconds. No per-peer map or background goroutine; close and write deadline interrupt delays. Unlike upstream, write errors are propagated rather than ignored.
 - Tests cover declaration validation, sequence/reset, expressions, ordering against independent Salamander decoding and cancellation. Real Xray interoperability and device resource measurements remain pending.
 
+## Stage 13 — UDP Header Custom prefix client
+
+- Supports prefix mode with static/random items, capture/reuse and bounded transforms through the existing header compiler. Client header sizing is validated before dialing; server expressions can use previously captured client bytes. Receive metadata expressions are rejected, matching Xray's address-free receive evaluator.
+- Per-connected-peer state has a five-second TTL. Failed matches never commit captures; malformed packets are dropped. Header lengths limited to 512 bytes per direction and 64 items total. No background goroutines.
+- Ordered composition with Noise and Salamander/Gecko; one instance per mask, at most three. Standalone handshake mode remains explicitly unsupported. External Xray process interoperability, full chain tests and mobile measurements remain gates.
+
 ## Remaining scope (not implemented)
 
 1. Verify pinned upstream parser, all fragment options, mask ordering and error semantics. Finish numeric write ranges and raw transport integration; verify full-stack cancellation and resource tests. Document deliberate divergences from Xray (including zero-length TLS records and incomplete initial writes).
