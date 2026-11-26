@@ -1,5 +1,5 @@
 name: SFI LX++ b41 LX.36 migration
-run-name: "LX iOS | b41 F1-F3 + LX.36 | b42 diagnostics 5bfadfa | regression gate"
+run-name: "LX iOS | b41 F1-F3 + LX.36 | b42 diagnostics-fixes c02151c | regression gate"
 
 on:
   push:
@@ -102,8 +102,8 @@ jobs:
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
           git -C clients/apple fetch --no-tags origin feat/diagnostics-b42
-          git -C clients/apple checkout --detach 5bfadfaedfe9edfedee5e5e92f3f63d6eddd2e1a
-          test "$(git -C clients/apple rev-parse HEAD)" = "5bfadfaedfe9edfedee5e5e92f3f63d6eddd2e1a"
+          git -C clients/apple checkout --detach c02151cd436a98e3bd5aeccd98ada9a3dfb0c02d
+          test "$(git -C clients/apple rev-parse HEAD)" = "c02151cd436a98e3bd5aeccd98ada9a3dfb0c02d"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
           for dep in utls wireguard-go sing-tun gvisor; do
@@ -127,6 +127,13 @@ jobs:
           test -f clients/apple/Library/Shared/SignedEntitlements.swift
           test -f clients/apple/FileProviderExtension/SignedEntitlements.swift
           test -f clients/apple/WidgetExtension/SignedEntitlements.swift
+          # All three physical copies must stay byte-identical: the File Provider
+          # and Widget targets compile their own copy, a silent divergence
+          # re-creates the "decoder inactive in FP" defect.
+          cmp clients/apple/Library/Shared/SignedEntitlements.swift clients/apple/FileProviderExtension/SignedEntitlements.swift
+          cmp clients/apple/Library/Shared/SignedEntitlements.swift clients/apple/WidgetExtension/SignedEntitlements.swift
+          cmp clients/apple/Library/Shared/DiagnosticsLog.swift clients/apple/FileProviderExtension/DiagnosticsLog.swift
+          cmp clients/apple/Library/Shared/DiagnosticsLog.swift clients/apple/WidgetExtension/DiagnosticsLog.swift
           test -f clients/apple/SFUnitTests/SigningCompatibilityTests.swift
           grep -q 'hasSharedContainer' clients/apple/Library/Shared/FilePath.swift
           grep -q 'hasSharedContainer' clients/apple/Library/Network/ExtensionProvider.swift
