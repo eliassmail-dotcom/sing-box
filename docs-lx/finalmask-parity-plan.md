@@ -1,0 +1,25 @@
+# FinalMask parity — staged migration
+
+Baseline: prepared/b41-lx36-45688648290-1 (111b2e50a2a065266e14fd4d22827dea501d424f), successful b41 run 45688648290. b42 is independent.
+
+Reference: Xray-core v26.11.9, transport/internet/finalmask/fragment/conn.go and config.proto. Xray uses MPL-2.0; sing-box uses GPL-3.0-or-later. The first change is a behavior-compatible extension of the existing LX implementation; no upstream source file has been vendored. For subsequent ports retain provenance, notices and applicable license terms, and review MPL section 3.3 before distributing combined code.
+
+## Stage 1 — existing TLS record fragmentation
+
+- Existing finalmask_fragment remains opt-in, tlshello and zero delay only.
+- Added optional max_split (integer or range encoded as a string). Omission or zero preserves unlimited splitting. A nonzero cap leaves the remaining payload in the last TLS record, preserving the original handshake and trailing bytes.
+- No change to default, IP Race, chain, or adaptive fragment selection. The existing mutually exclusive fragment selection is retained.
+- New regression tests cover range, cap, omission, invalid input and payload integrity. CI must pass before release.
+
+## Remaining scope (not implemented)
+
+1. Verify pinned upstream parser, all fragment options, mask ordering and error semantics. Add length/delay sequences, numeric write ranges and delay handling only with cancellation/deadline and resource tests. Document deliberate divergences from Xray (including zero-length TLS records and incomplete initial writes).
+2. Establish a shared transport-layer mask interface, audit TCP/UDP insertion points and detour handling. Do not layer masks twice or move TLS wrapping across the wrong hop.
+3. Evaluate other TCP and UDP mask implementations, and QUIC parameters against actual library capabilities; port individual supported masks with upstream interoperability tests, licensing notices and explicit rejection of unsupported options.
+4. Update generator import only after core contracts stabilize; add fixture-based checks and backward compatibility for finalmask=true.
+5. Compare Xray and LX with the same endpoint and profiles. Include cancellation, short writes, concurrency, memory/CPU and iOS Network Extension constraints. No shipping until regression and real-device checks pass.
+
+References:
+- https://github.com/XTLS/Xray-core/blob/v26.11.9/transport/internet/finalmask/fragment/conn.go
+- https://github.com/XTLS/Xray-core/blob/v26.11.9/transport/internet/finalmask/fragment/config.proto
+- https://github.com/XTLS/Xray-core/blob/v26.11.9/LICENSE
