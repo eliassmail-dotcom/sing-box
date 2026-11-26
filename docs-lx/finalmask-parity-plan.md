@@ -76,6 +76,12 @@ Reference: Xray-core v26.11.9, transport/internet/finalmask/fragment/conn.go and
 - Out-of-order reassembly, duplicate rejection, 8-second expiry, eight concurrent assemblies, max 4088 bytes per assembled datagram. Lazy expiration, no dedicated timer/goroutine. Limit is per connected peer and intentionally bounded for mobile.
 - Uses the pinned upstream wire layout; reference datagram tests cover framing, padding, reassembly, duplicates and bounds. External Xray binary interoperability and resource measurements remain release gates.
 
+## Stage 12 — UDP Noise declarative subset
+
+- One connected-UDP noise mask, standalone or ordered with Salamander/Gecko. Emits static/random/exp datagrams before the first write, or after the configured sliding idle reset interval; no receive-side transform. Supports b/r/rc/rd/t/c/n expression segments. Lua script execution explicitly unsupported.
+- Limits: 16 items, 1200 bytes per noise datagram, 8192-byte burst, one second total configured delay, reset at most 86400 seconds. No per-peer map or background goroutine; close and write deadline interrupt delays. Unlike upstream, write errors are propagated rather than ignored.
+- Tests cover declaration validation, sequence/reset, expressions, ordering against independent Salamander decoding and cancellation. Real Xray interoperability and device resource measurements remain pending.
+
 ## Remaining scope (not implemented)
 
 1. Verify pinned upstream parser, all fragment options, mask ordering and error semantics. Finish numeric write ranges and raw transport integration; verify full-stack cancellation and resource tests. Document deliberate divergences from Xray (including zero-length TLS records and incomplete initial writes).
