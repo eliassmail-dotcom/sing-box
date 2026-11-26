@@ -4,6 +4,8 @@ package finalmask
 
 import (
 	"reflect"
+	"net"
+	"syscall"
 	brutal "github.com/sagernet/sing-quic/hysteria/congestion"
 	"testing"
 	"time"
@@ -90,4 +92,24 @@ func TestLXFinalMaskQUICRenoAndBrutal(t *testing.T){
 	for _,s:=range []string{"NaN","Inf","-1m","1e8","1.2.3m","2mb/s","10gbps"}{
 		if _,e:=parseBrutalBandwidth(s);e==nil{t.Fatalf("accepted %s",s)}
 	}
+}
+
+func TestLXFinalMaskQUICCarrierControls(t *testing.T){
+	raw,err:=net.DialUDP("udp4",nil,&net.UDPAddr{IP:net.IPv4(127,0,0,1),Port:9})
+	if err!=nil{t.Fatal(err)}
+	defer raw.Close()
+	var absent *QUICParams
+	if absent.WrapCarrier(raw)!=raw{t.Fatal("default carrier wrapped")}
+	c:=&quic.Config{ChromeParrot:true}
+	p,err:=CompileQUICParams(&option.LXFinalMaskQUICParams{DisableStatelessReset:true},c)
+	if err!=nil||p.WrapCarrier(raw)!=raw||c.DisablePathMTUDiscovery||!c.ChromeParrot{t.Fatalf("client reset flag changed defaults: %v",err)}
+	p,err=CompileQUICParams(&option.LXFinalMaskQUICParams{DisableGSO:true,DisableStatelessReset:true},c)
+	if err!=nil||!c.DisablePathMTUDiscovery||!c.ChromeParrot{t.Fatalf("bad basic carrier options: %v",err)}
+	wrapped:=p.WrapCarrier(raw)
+	if _,ok:=wrapped.(syscall.Conn);ok{t.Fatal("raw descriptor exposed")}
+	if _,ok:=wrapped.(interface{Upstream()any});ok{t.Fatal("underlying carrier exposed")}
+	if wrapped.LocalAddr().String()!=raw.LocalAddr().String()||wrapped.RemoteAddr().String()!=raw.RemoteAddr().String(){t.Fatal("address changed")}
+	if err=wrapped.SetDeadline(time.Now().Add(time.Second));err!=nil{t.Fatal(err)}
+	if err=wrapped.Close();err!=nil{t.Fatal(err)}
+	if _,err=raw.Write([]byte{1});err==nil{t.Fatal("underlying socket not closed")}
 }

@@ -355,3 +355,59 @@ func TestLXFinalMaskXHTTPRejectNonH3(t *testing.T){
 	},testTLSConfig(t,"h2"))
 	if err==nil{t.Fatal("accepted UDP mask over HTTP/2")}
 }
+
+
+func TestLXFinalMaskHTTP3DisableGSO(t *testing.T) {
+	certificate, hash := testCertificate(t)
+	packetConn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http3.Server{
+		TLSConfig: http3.ConfigureTLSConfig(&stdTLS.Config{Certificates: []stdTLS.Certificate{*certificate}}),
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.(http.Flusher).Flush()
+			buffer := make([]byte, 4)
+			n, _ := io.ReadFull(r.Body, buffer)
+			w.Write(buffer[:n])
+			w.(http.Flusher).Flush()
+			io.Copy(io.Discard, r.Body)
+		}),
+	}
+	go server.Serve(packetConn)
+	defer server.Close()
+
+	tlsConfig, err := tls.NewClient(context.Background(), log.NewNOPFactory().Logger(), "localhost", option.OutboundTLSOptions{
+		Enabled:                    true,
+		ServerName:                 "localhost",
+		ALPN:                       []string{"h3"},
+		CertificatePublicKeySHA256: [][]byte{hash},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport, err := NewClient(context.Background(), N.SystemDialer, M.SocksaddrFromNet(packetConn.LocalAddr()), option.V2RayXHTTPOptions{Mode: modeStreamOne, Path: "/xhttp/", QUICParams: &option.LXFinalMaskQUICParams{DisableGSO:true,DisableStatelessReset:true}}, tlsConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := transport.(*Client)
+	defer client.Close()
+	if client.httpVersion != httpVersion3 {
+		t.Fatalf("version = %s", client.httpVersion)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, err := client.DialContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	buffer := make([]byte, 4)
+	if _, err := io.ReadFull(conn, buffer); err != nil || string(buffer) != "ping" {
+		t.Fatalf("echo = %q, %v", buffer, err)
+	}
+}

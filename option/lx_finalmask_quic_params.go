@@ -16,5 +16,9 @@ type LXFinalMaskQUICParams struct {
 	KeepAlivePeriod int64 `json:"keepAlivePeriod,omitempty"`
 	DisablePathMTUDiscovery bool `json:"disablePathMTUDiscovery,omitempty"`
 	DisableChromeParrot bool `json:"disableChromeParrot,omitempty"`
+	// DisableGSO selects basic UDP I/O, including disabled ECN/batching/PMTU.
+	DisableGSO bool `json:"disableGSO,omitempty"`
+	// Client sending of stateless resets is already disabled by default.
+	DisableStatelessReset bool `json:"disableStatelessReset,omitempty"`
 	MaxIncomingStreams int64 `json:"maxIncomingStreams,omitempty"`
 }

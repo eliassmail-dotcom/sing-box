@@ -126,7 +126,7 @@ func (c *Client) offerNew() (*clientConnection, error) {
 		return nil, err
 	}
 	if c.udpMask != nil { udpConn = c.udpMask.WrapConnected(udpConn) }
-	quicConn, err := qtls.Dial(c.ctx, udpConn, c.tlsConfig, c.quicConfig)
+	quicConn, err := qtls.Dial(c.ctx, c.quicParams.WrapCarrier(udpConn), c.tlsConfig, c.quicConfig)
 	if err != nil {
 		udpConn.Close()
 		return nil, err

@@ -178,7 +178,7 @@ func newHTTP3TransportWithParams(dialer N.Dialer, serverAddr M.Socksaddr, tlsCon
 					if mask != nil { packetConn = mask.WrapConnected(packetConn) }
 					handshakeConn, handshake := packetConn, (*lxdatagram.QUICHandshake)(nil)
 					if !mask.ReplacesCarrier(){handshakeConn,handshake=lxdatagram.GuardQUIC(lxsniffguard.AttemptFromContext(ctx), dialled, carrier, packetConn, logger)}
-					attemptConn, err := quic.DialEarlyConn(ctx, handshakeConn, stdConfig.Clone(), quicConfig)
+					attemptConn, err := quic.DialEarlyConn(ctx, params.WrapCarrier(handshakeConn), stdConfig.Clone(), quicConfig)
 					handshake.Done()
 					if err != nil {
 						packetConn.Close()

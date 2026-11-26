@@ -4,6 +4,8 @@ package finalmask
 
 import (
 	"errors"
+	"net"
+	qtls "github.com/sagernet/sing-quic"
 	"strconv"
 	"strings"
 	"time"
@@ -21,13 +23,14 @@ type QUICParams struct{
 	bbr bool
 	brutalUp uint64
 	disableLossCompensation bool
+	disableGSO bool
 }
 
 // CompileQUICParams applies only explicit settings to the caller's defaults.
 // Chrome's pinned transport parameters cannot be overridden silently.
 func CompileQUICParams(o *option.LXFinalMaskQUICParams,c *quic.Config)(*QUICParams,error){
 	if o==nil{return nil,nil}
-	p:=&QUICParams{}
+	p:=&QUICParams{disableGSO:o.DisableGSO}
 	switch strings.ToLower(o.Congestion){
 	case "", "reno":
 		if o.BBRProfile!=""{return nil,errors.New("bbrProfile requires congestion=bbr")}
@@ -76,7 +79,7 @@ func CompileQUICParams(o *option.LXFinalMaskQUICParams,c *quic.Config)(*QUICPara
 	}
 	if o.MaxIdleTimeout!=0{next.MaxIdleTimeout=time.Duration(o.MaxIdleTimeout)*time.Second}
 	if o.KeepAlivePeriod!=0{next.KeepAlivePeriod=time.Duration(o.KeepAlivePeriod)*time.Second}
-	if o.DisablePathMTUDiscovery{next.DisablePathMTUDiscovery=true}
+	if o.DisablePathMTUDiscovery||o.DisableGSO{next.DisablePathMTUDiscovery=true}
 	if o.MaxIncomingStreams!=0{next.MaxIncomingStreams=o.MaxIncomingStreams}
 	*c=next
 	return p,nil
@@ -122,3 +125,20 @@ func(p *QUICParams)newBrutalSender(size congestion.ByteCount)congestion.Congesti
 	if p.disableLossCompensation{return &uncompensatedBrutal{s}}
 	return s
 }
+
+// The pinned quic-go has no per-Transport DisableGSO switch. The normal
+// connected-UDP I/O path is used instead of descriptor-based optimizations.
+// This also avoids an unsupported DF/PMTU assumption on that path.
+// Deliberately do not expose Upstream, syscall.Conn or replaceable interfaces:
+// quic-go and qtls would otherwise recover the optimized raw socket.
+type quicBasicIOConn struct{net.Conn}
+
+func(p *QUICParams)WrapCarrier(c net.Conn)net.Conn{
+	if p==nil||!p.disableGSO{return c}
+	qtls.SetDesiredBufferSizes(c)
+	return &quicBasicIOConn{Conn:c}
+}
+
+// DisableStatelessReset is already satisfied by the client DialConn helpers:
+// their single-use Transport has a nil StatelessResetKey. Receiving valid
+// peer resets remains enabled. No global reset behavior is modified.
