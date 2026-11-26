@@ -82,3 +82,15 @@ func TestLXFinalMaskUDPNoiseInterrupt(t *testing.T){
 		c.Close();peer.Close()
 	}
 }
+
+func TestLXFinalMaskUDPNoiseHalfOpenRanges(t *testing.T){
+	m,err:=NewUDPChain(noiseOptions(`{"noise":[{"rand":"2-3","randRange":"9-9"},{"type":"exp","packet":"<r 3-4>"}]}`))
+	if err!=nil{t.Fatal(err)}
+	c:=m.WrapConnected(&capture{}).(*udpNoiseConn)
+	for i:=0;i<100;i++{
+		b,err:=c.packet(c.config.items[0])
+		if err!=nil||!bytes.Equal(b,[]byte{9,9}){t.Fatalf("legacy range %x %v",b,err)}
+		b,err=c.packet(c.config.items[1])
+		if err!=nil||len(b)<3||len(b)>4{t.Fatalf("expression range %d %v",len(b),err)}
+	}
+}

@@ -78,7 +78,7 @@ Reference: Xray-core v26.11.9, transport/internet/finalmask/fragment/conn.go and
 
 ## Stage 12 — UDP Noise declarative subset
 
-- One connected-UDP noise mask, standalone or ordered with Salamander/Gecko. Emits static/random/exp datagrams before the first write, or after the configured sliding idle reset interval; no receive-side transform. Supports b/r/rc/rd/t/c/n expression segments. Lua script execution explicitly unsupported.
+- One connected-UDP noise mask, standalone or ordered with Salamander/Gecko. Emits static/random/exp datagrams before the first write, or after the configured sliding idle reset interval; no receive-side transform. Supports b/r/rc/rd/t/c/n expression segments. Legacy random length/reset/delay ranges are half-open as in Xray, expression size and random byte-value ranges inclusive. Lua script execution explicitly unsupported.
 - Limits: 16 items, 1200 bytes per noise datagram, 8192-byte burst, one second total configured delay, reset at most 86400 seconds. No per-peer map or background goroutine; close and write deadline interrupt delays. Unlike upstream, write errors are propagated rather than ignored.
 - Tests cover declaration validation, sequence/reset, expressions, ordering against independent Salamander decoding and cancellation. Real Xray interoperability and device resource measurements remain pending.
 

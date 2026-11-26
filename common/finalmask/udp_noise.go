@@ -42,6 +42,7 @@ type udpNoiseSegment struct {
 	data []byte
 	lo,hi int
 	valueLo,valueHi int
+	exclusiveLength bool
 }
 type udpNoiseItem struct {
 	segments []udpNoiseSegment
@@ -118,7 +119,7 @@ func compileUDPNoise(raw json.RawMessage)(*udpNoiseConfig,error){
 		case strings.EqualFold(item.Type,"exp"):
 			segments,err=compileNoiseExp(item.Packet)
 		case rhi>0:
-			segments=[]udpNoiseSegment{{kind:"r",lo:rlo,hi:rhi,valueLo:vlo,valueHi:vhi}}
+			segments=[]udpNoiseSegment{{kind:"r",lo:rlo,hi:rhi,valueLo:vlo,valueHi:vhi,exclusiveLength:true}}
 		default:
 			var b []byte
 			b,err=headerBytes(item.Packet,item.Type)
@@ -154,6 +155,13 @@ func newUDPNoiseConn(raw net.Conn,c *udpNoiseConfig)*udpNoiseConn{
 	return &udpNoiseConn{Conn:raw,config:c,closed:make(chan struct{}),changed:make(chan struct{})}
 }
 
+// Xray crypto.RandBetween is half-open; fixed equal bounds remain fixed.
+// Expression segment sizes use RandBetween(min,max+1) instead.
+func noiseSampleExclusive(lo,hi int)int{
+	if hi<=lo+1{return lo}
+	return sample(lo,hi-1)
+}
+
 func(c *udpNoiseConn)packet(item udpNoiseItem)([]byte,error){
 	p:=c.buf[:0]
 	for _,seg:=range item.segments{
@@ -169,9 +177,11 @@ func(c *udpNoiseConn)packet(item udpNoiseItem)([]byte,error){
 			p=p[:len(p)+8]
 		default:
 			size:=sample(seg.lo,seg.hi)
+			if seg.exclusiveLength{size=noiseSampleExclusive(seg.lo,seg.hi)}
 			b:=c.buf[len(p):len(p)+size]
 			if seg.kind=="r"&&(seg.valueLo!=0||seg.valueHi!=255){
-				for i:=range b{b[i]=byte(sample(seg.valueLo,seg.valueHi))}
+				if _,err:=rand.Read(b);err!=nil{return nil,err}
+				for i:=range b{b[i]=byte(seg.valueLo+int(b[i])%(seg.valueHi-seg.valueLo+1))}
 			}else{
 				if _,err:=rand.Read(b);err!=nil{return nil,err}
 				switch seg.kind{
@@ -201,14 +211,14 @@ func(c *udpNoiseConn)Write(p []byte)(int,error){
 				if err!=nil{return 0,err}
 				if n!=len(b){return 0,io.ErrShortWrite}
 			}
-			if err:=c.wait(time.Duration(sample(item.delayLo,item.delayHi))*time.Millisecond);err!=nil{return 0,err}
+			if err:=c.wait(time.Duration(noiseSampleExclusive(item.delayLo,item.delayHi))*time.Millisecond);err!=nil{return 0,err}
 		}
 	}
 	n,err:=c.Conn.Write(p)
 	if err==nil&&n!=len(p){err=io.ErrShortWrite}
 	if err==nil{
 		// Xray reset is a sliding idle timeout, not a periodic timer.
-		c.next=time.Now().Add(time.Duration(sample(c.config.resetLo,c.config.resetHi))*time.Second)
+		c.next=time.Now().Add(time.Duration(noiseSampleExclusive(c.config.resetLo,c.config.resetHi))*time.Second)
 	}
 	return n,err
 }
