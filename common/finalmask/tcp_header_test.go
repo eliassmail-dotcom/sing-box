@@ -77,7 +77,7 @@ func TestLXFinalMaskTCPHeaderValidation(t *testing.T){
 	for _,s:=range []string{
 		`{"clients":[[{"capture":"bad-name","rand":2}]]}`,
 		`{"clients":[[{"reuse":"v"}]]}`,
-		`{"clients":[[{"transform":{"op":"xor"}}]]}`,
+		`{"clients":[[{"transform":{"op":"unsupported"}}]]}`,
 		`{"clients":[[{"rand":1,"packet":[1]}]]}`,
 		`{"clients":[[{"rand":16385}]]}`,
 		`{"clients":[[{"rand":1,"randRange":"9-2"}]]}`,

@@ -33,6 +33,8 @@ type headerItem struct {
 	lo,hi int
 	delayLo,delayHi int
 	capture,reuse string
+	transformRaw json.RawMessage
+	transform *headerExpr
 }
 
 type TCPHeader struct {
@@ -97,7 +99,7 @@ func NewTCPHeader(o *option.LXFinalMaskTCPHeaderOptions)(*TCPHeader,error){
 			for _,item:=range seq{
 				items++
 				if items>headerMaxItems{return nil,errors.New("too many header items")}
-				if len(item.Transform)!=0{return nil,errors.New("header transforms unsupported")}
+				if len(item.Transform)!=0&&(item.Rand!=0||len(item.Packet)!=0||item.Reuse!=""){return nil,errors.New("multiple header item kinds")}
 				if !validHeaderVariable(item.Capture)||!validHeaderVariable(item.Reuse){return nil,errors.New("invalid header variable name")}
 				if item.Reuse!=""&&(item.Rand!=0||len(item.Packet)!=0){return nil,errors.New("multiple header item kinds")}
 				if item.Rand<0||item.Rand>headerMaxBytes||(item.Rand>0&&len(item.Packet)!=0){return nil,errors.New("invalid random header item")}
@@ -111,8 +113,8 @@ func NewTCPHeader(o *option.LXFinalMaskTCPHeaderOptions)(*TCPHeader,error){
 				if total>headerMaxBytes{return nil,errors.New("header byte budget exceeded")}
 				if sending{budget+=dhi}
 				if budget>5000{return nil,errors.New("header delay budget exceeded")}
-				if item.Capture!="" && len(packet)+item.Rand==0 && item.Reuse==""{return nil,errors.New("capture needs a nonempty source")}
-				round=append(round,headerItem{packet:packet,random:item.Rand,lo:lo,hi:hi,delayLo:dlo,delayHi:dhi,capture:item.Capture,reuse:item.Reuse})
+				if item.Capture!="" && len(packet)+item.Rand==0 && item.Reuse=="" && len(item.Transform)==0 {return nil,errors.New("capture needs a nonempty source")}
+				round=append(round,headerItem{packet:packet,random:item.Rand,lo:lo,hi:hi,delayLo:dlo,delayHi:dhi,capture:item.Capture,reuse:item.Reuse,transformRaw:bytes.Clone(item.Transform)})
 			}
 			out=append(out,round)
 		}
@@ -125,8 +127,10 @@ func NewTCPHeader(o *option.LXFinalMaskTCPHeaderOptions)(*TCPHeader,error){
 	// Validate in actual exchange order, not in client-array/server-array
 	// order. All variable sizes are statically known in this subset.
 	sizes:=make(map[string]int)
+	compiler:=headerExprCompiler{sizes:sizes}
 	check:=func(seq []headerItem)error{
-		for _,item:=range seq{
+		for i:=range seq{
+			item:=&seq[i]
 			size:=len(item.packet)+item.random
 			if item.reuse!=""{
 				var ok bool
@@ -134,6 +138,16 @@ func NewTCPHeader(o *option.LXFinalMaskTCPHeaderOptions)(*TCPHeader,error){
 				if !ok{return fmt.Errorf("unknown header variable %q",item.reuse)}
 				total+=size
 				if total>headerMaxBytes{return errors.New("header byte budget exceeded by reuse")}
+			}
+			if len(item.transformRaw)!=0 {
+				expr,err:=compiler.compile(item.transformRaw,0)
+				if err!=nil{return err}
+				if expr.width<0{return errors.New("header transform must return bytes")}
+				item.transform=expr
+				item.transformRaw=nil
+				size=expr.width
+				total+=size
+				if total>headerMaxBytes{return errors.New("header byte budget exceeded by transform")}
 			}
 			if item.capture!=""{sizes[item.capture]=size}
 		}
@@ -177,7 +191,7 @@ func headerRandom(item headerItem)([]byte,error){
 	return b,nil
 }
 
-func sendHeader(ctx context.Context,c net.Conn,seq []headerItem,vars map[string][]byte)error{
+func sendHeader(ctx context.Context,c net.Conn,seq []headerItem,vars map[string][]byte,metadata map[string]uint64)error{
 	var merged []byte
 	for _,item:=range seq{
 		if err:=ctx.Err();err!=nil{return err}
@@ -195,6 +209,10 @@ func sendHeader(ctx context.Context,c net.Conn,seq []headerItem,vars map[string]
 			var ok bool
 			value,ok=vars[item.reuse]
 			if !ok{return fmt.Errorf("unknown header variable %q",item.reuse)}
+		}else if item.transform!=nil{
+			result,err:=item.transform.eval(vars,metadata)
+			if err!=nil{return err}
+			value=result.b
 		}else{value=item.packet}
 		if item.capture!=""{vars[item.capture]=bytes.Clone(value)}
 		merged=append(merged,value...)
@@ -210,8 +228,13 @@ func receiveHeader(c net.Conn,seq []headerItem,vars map[string][]byte)error{
 			expected,ok=vars[item.reuse]
 			if !ok{return fmt.Errorf("unknown header variable %q",item.reuse)}
 		}
+		if item.transform!=nil{
+			result,err:=item.transform.eval(vars,metadata)
+			if err!=nil{return err}
+			expected=result.b
+		}
 		size:=len(expected)+item.random
-		if size==0{continue}
+		if size==0{if item.capture!=""{vars[item.capture]=nil};continue}
 		buf:=make([]byte,size)
 		if _,err:=io.ReadFull(c,buf);err!=nil{return err}
 		// Like Xray, random receive items are consumed without checking value.
@@ -231,15 +254,16 @@ func(h *TCPHeader) Handshake(ctx context.Context,c net.Conn)(net.Conn,error){
 	stop:=context.AfterFunc(ctx,func(){_ = c.Close()})
 	exchange:=func()error{
 		vars:=make(map[string][]byte)
+		metadata:=headerMetadata(c)
 		j:=0
 		for _,seq:=range h.clients{
-			if err:=sendHeader(ctx,c,seq,vars);err!=nil{return err}
+			if err:=sendHeader(ctx,c,seq,vars,metadata);err!=nil{return err}
 			if j<len(h.servers){
-				if err:=receiveHeader(c,h.servers[j],vars);err!=nil{return err}
+				if err:=receiveHeader(c,h.servers[j],vars,metadata);err!=nil{return err}
 				j++
 			}
 		}
-		for ;j<len(h.servers);j++{if err:=receiveHeader(c,h.servers[j],vars);err!=nil{return err}}
+		for ;j<len(h.servers);j++{if err:=receiveHeader(c,h.servers[j],vars,metadata);err!=nil{return err}}
 		return nil
 	}
 	err:=exchange()

@@ -2,8 +2,8 @@ package option
 
 import "encoding/json"
 
-// LXFinalMaskTCPHeaderOptions is the static/random and capture/reuse client subset of Xray
-// header-custom. Transform expressions and server error sequences are rejected.
+// LXFinalMaskTCPHeaderOptions is the static/random, capture/reuse and transform client subset of Xray
+// header-custom. Server error sequences are rejected; transforms are bounded.
 type LXFinalMaskTCPHeaderOptions struct {
 	Clients [][]LXFinalMaskTCPHeaderItem `json:"clients"`
 	Servers [][]LXFinalMaskTCPHeaderItem `json:"servers"`

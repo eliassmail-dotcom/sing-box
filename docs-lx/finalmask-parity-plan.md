@@ -42,7 +42,13 @@ Reference: Xray-core v26.11.9, transport/internet/finalmask/fragment/conn.go and
 
 - Capture static or random nonempty bytes and reuse earlier values on either side of the same handshake. Validate the variable references in actual alternating client/server order before dialing.
 - Variables are per-handshake, never shared across connections; received reuse values must match the captured value. Byte budget includes repeated values, and variable names are limited to 64 characters.
-- Transform expressions and server error sequences are still explicitly rejected. Cross-connection state is intentionally not implemented; Xray evaluator and binary interop remain separate gates.
+- Transform expressions were initially rejected; server error sequences remain rejected. Cross-connection state is intentionally not implemented; Xray evaluator and binary interop remain separate gates.
+
+## Stage 7 — bounded TCP header transforms
+
+- Typed expression compiler for the pinned Xray vocabulary: concat/slice/pad/truncate, integer packing, xor16/xor32, checked arithmetic and bitwise operations, nested expressions, captured variables and numeric address metadata. Fixed output widths are validated before dialing.
+- Limits: 256 expression nodes across a header, depth 12, 64 args per expression, 16 KiB output, 256 KiB cumulative intermediate byte work. Slice/pad/truncate lengths must be literal bounded u64 values (matching Xray receive sizing); metadata must be present on the actual connection. Runtime overflows fail closed.
+- This is a behavior-based implementation, not upstream code vendoring. Interop against actual Xray remains pending; server error sequences and additional transports/masks remain out of scope.
 
 ## Remaining scope (not implemented)
 
