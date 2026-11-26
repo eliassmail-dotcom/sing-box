@@ -23,7 +23,10 @@ set -euxo pipefail
 : "${LX_PREPARED_SHA:?set LX_PREPARED_SHA to the prepared iOS core commit}"
 : "${LX_UPSTREAM_SHA:?set LX_UPSTREAM_SHA to the integrated upstream commit}"
 
-test -z "$(git status --porcelain)" || { echo "working tree not clean" >&2; exit 1; }
+# Ignore submodule pointer drift here: right after merging a prepared core the
+# recorded gitlinks may be ahead of the checked-out working copies; the update
+# below syncs them deterministically to the recorded pins.
+test -z "$(git status --porcelain --ignore-submodules=all)" || { echo "working tree not clean" >&2; exit 1; }
 git merge-base --is-ancestor "$LX_PREPARED_SHA" HEAD || { echo "LX_PREPARED_SHA is not an ancestor of HEAD" >&2; exit 1; }
 
 BASE_SHA=$(git rev-parse HEAD)
@@ -33,6 +36,8 @@ if [ -n "${LX_WIN_TAG:-}" ]; then
   git tag -f "$LX_WIN_TAG" HEAD
 fi
 
+# Sync submodule working copies to the recorded gitlinks (expected pointer
+# drift right after merging a prepared core); --init also fetches new pins.
 git submodule update --init
 
 mkdir -p dist
