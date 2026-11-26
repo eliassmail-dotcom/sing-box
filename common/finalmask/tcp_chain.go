@@ -11,11 +11,13 @@ import (
 	"strconv"
 
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/common/finalmask/sudoku"
 )
 
 type tcpMask struct {
 	fragment *TCPFragment
 	header *TCPHeader
+	sudoku *sudoku.Mask
 }
 
 // TCPChain is immutable. Its configured order follows Xray: the first
@@ -89,7 +91,7 @@ func compileFragmentSettings(raw json.RawMessage)(*TCPFragment,error){
 
 func NewTCPChain(opts []option.LXFinalMaskTCPMaskOptions)(*TCPChain,error){
 	if len(opts)==0{return nil,nil}
-	if len(opts)>2{return nil,errors.New("finalmask_tcp: at most two masks in pilot")}
+	if len(opts)>3{return nil,errors.New("finalmask_tcp: at most three masks in pilot")}
 	c:=&TCPChain{}
 	seen:=make(map[string]bool)
 	for i,o:=range opts{
@@ -100,6 +102,9 @@ func NewTCPChain(opts []option.LXFinalMaskTCPMaskOptions)(*TCPChain,error){
 		switch o.Type{
 		case "fragment":
 			m.fragment,err=compileFragmentSettings(o.Settings)
+		case "sudoku":
+			var settings sudoku.Config
+			if err=decodeMaskSettings(o.Settings,&settings);err==nil{m.sudoku,err=sudoku.New(&settings)}
 		case "header-custom":
 			var settings option.LXFinalMaskTCPHeaderOptions
 			if err=decodeMaskSettings(o.Settings,&settings);err==nil{
@@ -120,6 +125,8 @@ func (c *TCPChain) Wrap(ctx context.Context,conn net.Conn)(net.Conn,error){
 		m:=c.masks[i]
 		if m.fragment!=nil{
 			conn=m.fragment.Wrap(conn)
+		}else if m.sudoku!=nil{
+			conn=m.sudoku.WrapClient(conn)
 		}else{
 			// Handshake owns failure cleanup, including any inner fragment.
 			wrapped,err:=m.header.Handshake(ctx,conn)

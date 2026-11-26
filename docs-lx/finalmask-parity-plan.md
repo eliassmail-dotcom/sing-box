@@ -50,6 +50,13 @@ Reference: Xray-core v26.11.9, transport/internet/finalmask/fragment/conn.go and
 - Limits: 256 expression nodes across a header, depth 12, 64 args per expression, 16 KiB output, 256 KiB cumulative intermediate byte work. Slice/pad/truncate lengths must be literal bounded u64 values (matching Xray receive sizing); metadata must be present on the actual connection. Runtime overflows fail closed.
 - This is a behavior-based implementation, not upstream code vendoring. Interop against actual Xray remains pending; server error sequences and additional transports/masks remain out of scope.
 
+## Stage 8 — TCP Sudoku / filter disposition
+
+- Xray filter is a server-side listener/source filter; its client wrap is a no-op. No client filtering was added; the list compiler still rejects unsupported filter entries.
+- Ported the Xray v26.11.9 Sudoku table, codec and packed-stream algorithms under MPL-2.0. Client uplink is classic Sudoku and downlink is packed. See common/finalmask/sudoku/UPSTREAM.md for provenance and adaptations.
+- Shared immutable clue-group index; no unbounded password-keyed cache. Per-outbound tables share base clue arrays; 4 KiB plaintext write chunks and read chunks, up to eight configured tables, padding 0-100. One sudoku entry is supported in the ordered plain VLESS TCP chain.
+- Tests cover independent reference vectors/round-trip, rotation, padding, large streams, and config rejection. Real Xray executable interoperability and mobile memory measurements remain release gates. UDP Sudoku and TLS/REALITY integration are not implemented.
+
 ## Remaining scope (not implemented)
 
 1. Verify pinned upstream parser, all fragment options, mask ordering and error semantics. Finish numeric write ranges and raw transport integration; verify full-stack cancellation and resource tests. Document deliberate divergences from Xray (including zero-length TLS records and incomplete initial writes).
