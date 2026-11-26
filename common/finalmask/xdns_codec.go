@@ -27,6 +27,7 @@ var xdnsBase32=base32.StdEncoding.WithPadding(base32.NoPadding)
 type xdnsConfig struct{
 	resolver M.Socksaddr
 	alternates []*xdnsConfig
+	domains []*xdnsConfig
 	network string
 	dohURL, dohServerName string
 	dohWorkers int
@@ -38,14 +39,16 @@ type xdnsConfig struct{
 	labelLimit,capacity,edns,extraPoll int
 }
 
-type xdnsSettings struct{
-		Domains []struct{
+type xdnsDomainSettings struct{
 			Names []string `json:"names"`
 			LenLimit int `json:"lenLimit"`
 			LabelLimit int `json:"labelLimit"`
 			Types []int `json:"types"`
 			EDNS int `json:"edns0"`
-		} `json:"domains"`
+		}
+
+type xdnsSettings struct{
+		Domains []xdnsDomainSettings `json:"domains"`
 		Resolvers []struct{
 			Addrs []string `json:"addrs"`
 			Worker int `json:"worker"`
@@ -63,7 +66,20 @@ type xdnsSettings struct{
 func compileXDNS(raw json.RawMessage)(*xdnsConfig,error){
 	var s xdnsSettings
 	if err:=decodeMaskSettings(raw,&s);err!=nil{return nil,err}
-	if len(s.Domains)!=1||len(s.Domains[0].Names)!=1||len(s.Resolvers)==0||len(s.Resolvers)>3{return nil,errors.New("XDNS requires one domain and one to three resolvers")}
+	if len(s.Domains)==0||len(s.Domains)>4||len(s.Resolvers)==0||len(s.Resolvers)>3{return nil,errors.New("XDNS requires one to four domain groups and one to three resolvers")}
+	var domains []*xdnsConfig
+	for _,d:=range s.Domains{
+		if len(d.Names)==0||len(d.Names)>4{return nil,errors.New("invalid XDNS domain count")}
+		for _,name:=range d.Names{
+			if len(domains)>=4{return nil,errors.New("XDNS supports at most four domain names")}
+			cfg,err:=compileXDNSDomain(d,name)
+			if err!=nil{return nil,err}
+			for _,other:=range domains{
+				if cfg.domain==other.domain||strings.HasSuffix(cfg.domain,"."+other.domain)||strings.HasSuffix(other.domain,"."+cfg.domain){return nil,errors.New("duplicate or overlapping XDNS domain")}
+			}
+			domains=append(domains,cfg)
+		}
+	}
 	var entries []*xdnsConfig
 	workers:=0
 	seenResolvers:=make(map[string]bool)
@@ -74,7 +90,7 @@ func compileXDNS(raw json.RawMessage)(*xdnsConfig,error){
 			single:=s
 			single.Resolvers=append(s.Resolvers[:0:0],s.Resolvers[i])
 			single.Resolvers[0].Addrs=[]string{addr}
-			cfg,err:=compileXDNSSingle(single)
+			cfg,err:=compileXDNSSingle(single,domains[0])
 			if err!=nil{return nil,err}
 			key:=cfg.network+"|"+cfg.resolver.String()+"|"+cfg.dohURL
 			if seenResolvers[key]{return nil,errors.New("duplicate XDNS resolver")}
@@ -86,11 +102,11 @@ func compileXDNS(raw json.RawMessage)(*xdnsConfig,error){
 	}
 	primary:=entries[0]
 	primary.alternates=entries[1:]
+	if len(domains)>1{primary.domains=domains}
 	return primary,nil
 }
 
-func compileXDNSSingle(s xdnsSettings)(*xdnsConfig,error){
-	d,r:=s.Domains[0],s.Resolvers[0]
+func compileXDNSDomain(d xdnsDomainSettings,name string)(*xdnsConfig,error){
 	if len(d.Types)==0{d.Types=[]int{16}}
 	if len(d.Types)>4{return nil,errors.New("too many XDNS query types")}
 	var types []dnsmessage.Type
@@ -102,6 +118,29 @@ func compileXDNSSingle(s xdnsSettings)(*xdnsConfig,error){
 		types=append(types,dnsmessage.Type(v))
 	}
 	if d.EDNS<2048||d.EDNS>4096{return nil,errors.New("XDNS QUIC pilot requires edns0 2048-4096")}
+	domain:=strings.ToLower(name)
+	if domain==""||len(domain)>253||strings.HasSuffix(domain,"."){return nil,errors.New("invalid XDNS domain")}
+	for _,label:=range strings.Split(domain,"."){
+		if len(label)==0||len(label)>63{return nil,errors.New("invalid XDNS domain label")}
+		for _,b:=range []byte(label){if !(b>='a'&&b<='z'||b>='0'&&b<='9'||b=='-'){return nil,errors.New("XDNS pilot requires ASCII DNS labels")}}
+	}
+	domain+="."
+	if d.LenLimit==0{d.LenLimit=255}
+	if d.LabelLimit==0{d.LabelLimit=63}
+	if d.LenLimit<1||d.LenLimit>255||d.LabelLimit<1||d.LabelLimit>63{return nil,errors.New("invalid XDNS name limits")}
+	capacity:=0
+	for n:=1;n<=159;n++{
+		enc:=xdnsBase32.EncodedLen(n)
+		labels:=(enc+d.LabelLimit-1)/d.LabelLimit
+		if len(domain)+enc+labels+1>d.LenLimit{break}
+		capacity=n
+	}
+	if capacity<32{return nil,errors.New("XDNS domain capacity too small")}
+	return &xdnsConfig{domain:domain,types:types,labelLimit:d.LabelLimit,capacity:capacity,edns:d.EDNS},nil
+}
+
+func compileXDNSSingle(s xdnsSettings,domainCfg *xdnsConfig)(*xdnsConfig,error){
+	r:=s.Resolvers[0]
 	if r.Worker<0||r.Worker>32||s.ExtraPoll<0||s.ExtraPoll>3{return nil,errors.New("invalid XDNS worker or extraPoll")}
 	address:=r.Addrs[0]
 	if !strings.Contains(address,"://"){address="udp://"+address}
@@ -123,25 +162,7 @@ func compileXDNSSingle(s xdnsSettings)(*xdnsConfig,error){
 	if port==""{port="53";if u.Scheme=="https"{port="443"}}
 	p,err:=strconv.Atoi(port)
 	if err!=nil||p<1||p>65535{return nil,errors.New("invalid XDNS resolver port")}
-	domain:=strings.ToLower(d.Names[0])
-	if domain==""||len(domain)>253||strings.HasSuffix(domain,"."){return nil,errors.New("invalid XDNS domain")}
-	for _,label:=range strings.Split(domain,"."){
-		if len(label)==0||len(label)>63{return nil,errors.New("invalid XDNS domain label")}
-		for _,b:=range []byte(label){if !(b>='a'&&b<='z'||b>='0'&&b<='9'||b=='-'){return nil,errors.New("XDNS pilot requires ASCII DNS labels")}}
-	}
-	domain+="."
-	if d.LenLimit==0{d.LenLimit=255}
-	if d.LabelLimit==0{d.LabelLimit=63}
-	if d.LenLimit<1||d.LenLimit>255||d.LabelLimit<1||d.LabelLimit>63{return nil,errors.New("invalid XDNS name limits")}
-	capacity:=0
-	for n:=1;n<=159;n++{
-		enc:=xdnsBase32.EncodedLen(n)
-		labels:=(enc+d.LabelLimit-1)/d.LabelLimit
-		if len(domain)+enc+labels+1>d.LenLimit{break}
-		capacity=n
-	}
-	if capacity<32{return nil,errors.New("XDNS domain capacity too small")}
-	cfg:=&xdnsConfig{resolver:M.ParseSocksaddr(net.JoinHostPort(ip.String(),port)),network:u.Scheme,domain:domain,types:types,labelLimit:d.LabelLimit,capacity:capacity,edns:d.EDNS,extraPoll:s.ExtraPoll}
+	cfg:=&xdnsConfig{resolver:M.ParseSocksaddr(net.JoinHostPort(ip.String(),port)),network:u.Scheme,domain:domainCfg.domain,types:domainCfg.types,labelLimit:domainCfg.labelLimit,capacity:domainCfg.capacity,edns:domainCfg.edns,extraPoll:s.ExtraPoll}
 	if u.Scheme=="https"{
 		cfg.dohURL=u.String();cfg.dohWorkers=r.Worker
 		cfg.dohServerName=host

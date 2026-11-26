@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	mathrand "math/rand"
 	"net"
 	"os"
 	"sync"
@@ -14,7 +15,7 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 )
 
-type xdnsPending struct{ id uint16; typ dnsmessage.Type; name string; until time.Time }
+type xdnsPending struct{ id uint16; typ dnsmessage.Type; name string; until time.Time; domain *xdnsConfig }
 type xdnsConn struct{
 	net.Conn
 	cfg *xdnsConfig
@@ -48,21 +49,26 @@ func(c *xdnsConn)err()error{
 	if c.terminal!=nil{return c.terminal};return net.ErrClosed
 }
 func(c *xdnsConn)send(p []byte)error{
+	domain:=c.cfg
+	if len(c.cfg.domains)>0{domain=c.cfg.domains[mathrand.Intn(len(c.cfg.domains))]}
+	return c.sendDomain(p,domain)
+}
+func(c *xdnsConn)sendDomain(p []byte,domain *xdnsConfig)error{
 	select{case <-c.closed:return c.err();default:}
 	if !c.initialized{
 		if _,err:=rand.Read(c.clientID[:]);err!=nil{return err}
 		c.clientID[0]&=0xfc;c.initialized=true
 	}
-	c.frag++
-	frames,err:=c.cfg.frames(c.clientID,c.frag,p);if err!=nil{return err}
+	if len(p)>domain.capacity-12{c.frag++}
+	frames,err:=domain.frames(c.clientID,c.frag,p);if err!=nil{return err}
 	for _,frame:=range frames{
 		var idBytes [2]byte
 		if _,err:=rand.Read(idBytes[:]);err!=nil{return err}
 		id:=binary.BigEndian.Uint16(idBytes[:])
-		wire,name,err:=c.cfg.query(id,frame);if err!=nil{return err}
+		wire,name,err:=domain.query(id,frame);if err!=nil{return err}
 		c.mu.Lock()
 		slot:=c.next%len(c.pending);c.next++
-		c.pending[slot]=xdnsPending{id:id,typ:xdnsQueryType(frame[0]&3),name:name,until:time.Now().Add(10*time.Second)}
+		c.pending[slot]=xdnsPending{id:id,typ:xdnsQueryType(frame[0]&3),name:name,until:time.Now().Add(10*time.Second),domain:domain}
 		c.mu.Unlock()
 		n,err:=c.Conn.Write(wire)
 		if err==nil&&n!=len(wire){err=io.ErrShortWrite}
@@ -95,7 +101,9 @@ func(c *xdnsConn)reader(){
 		for i,p:=range c.pending{if p.id==msg.Header.ID&&p.typ==msg.Questions[0].Type&&p.name!=""&&strings.EqualFold(p.name,name)&&now.Before(p.until){found=i;break}}
 		if found<0{c.mu.Unlock();continue}
 		expected:=c.pending[found].name
-		packets,e:=c.cfg.decodeResponse(&msg,expected,c.pending[found].typ)
+		domain:=c.pending[found].domain
+		if domain==nil{c.mu.Unlock();continue}
+		packets,e:=domain.decodeResponse(&msg,expected,c.pending[found].typ)
 		if e==nil{c.pending[found]=xdnsPending{}}
 		c.mu.Unlock()
 		if e!=nil{continue}
