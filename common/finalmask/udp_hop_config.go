@@ -1,7 +1,6 @@
 package finalmask
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"math/rand"
