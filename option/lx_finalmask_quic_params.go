@@ -4,6 +4,9 @@ package option
 // quic_params block. Zero values leave the transport defaults unchanged.
 type LXFinalMaskQUICParams struct {
 	Congestion string `json:"congestion,omitempty"`
+	BrutalUp string `json:"brutalUp,omitempty"`
+	BrutalDown string `json:"brutalDown,omitempty"`
+	BrutalDisableLossCompensation bool `json:"brutalDisableLossCompensation,omitempty"`
 	BBRProfile string `json:"bbrProfile,omitempty"`
 	InitStreamReceiveWindow uint64 `json:"initStreamReceiveWindow,omitempty"`
 	MaxStreamReceiveWindow uint64 `json:"maxStreamReceiveWindow,omitempty"`

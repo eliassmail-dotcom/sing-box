@@ -4,6 +4,7 @@ package finalmask
 
 import (
 	"reflect"
+	brutal "github.com/sagernet/sing-quic/hysteria/congestion"
 	"testing"
 	"time"
 
@@ -40,7 +41,14 @@ func TestLXFinalMaskQUICParamsMapping(t *testing.T){
 
 func TestLXFinalMaskQUICParamsValidation(t *testing.T){
 	for _,o:=range []option.LXFinalMaskQUICParams{
-		{Congestion:"reno"},
+		{Congestion:"unknown"},
+		{Congestion:"brutal",BrutalUp:"10mbps"},
+		{Congestion:"force-brutal"},
+		{Congestion:"force-brutal",BrutalUp:"1kbps"},
+		{Congestion:"force-brutal",BrutalUp:"10gbps"},
+		{Congestion:"force-brutal",BrutalUp:"10mbps",BrutalDown:"20mbps"},
+		{Congestion:"reno",BrutalDisableLossCompensation:true},
+		{Congestion:"bbr",BrutalUp:"10mbps"},
 		{BBRProfile:"standard"},
 		{Congestion:"bbr",BBRProfile:"unknown"},
 		{InitStreamReceiveWindow:16383},
@@ -58,5 +66,28 @@ func TestLXFinalMaskQUICParamsValidation(t *testing.T){
 		before:=*c
 		if _,e:=CompileQUICParams(&o,c);e==nil{t.Fatalf("accepted invalid options: %+v",o)}
 		if !reflect.DeepEqual(before,*c){t.Fatal("failed compilation mutated config")}
+	}
+}
+
+func TestLXFinalMaskQUICRenoAndBrutal(t *testing.T){
+	c:=&quic.Config{ChromeParrot:true}
+	before:=*c
+	p,e:=CompileQUICParams(&option.LXFinalMaskQUICParams{Congestion:"reno"},c)
+	if e!=nil||p.bbr||p.brutalUp!=0||!reflect.DeepEqual(before,*c){t.Fatalf("native Reno changed: %v",e)}
+	for _,disable:=range []bool{false,true}{
+		p,e=CompileQUICParams(&option.LXFinalMaskQUICParams{Congestion:"force-brutal",BrutalUp:"10 Mbps",BrutalDisableLossCompensation:disable},c)
+		if e!=nil||p.bbr||p.brutalUp!=1310720||p.disableLossCompensation!=disable{t.Fatalf("bad Brutal config %v",e)}
+		s:=p.newBrutalSender(1200)
+		if disable{
+			if _,ok:=s.(*uncompensatedBrutal);!ok{t.Fatal("loss compensation not disabled")}
+		}else if _,ok:=s.(*brutal.BrutalSender);!ok{t.Fatal("unexpected compensated sender")}
+	}
+	for _,v:=range []struct{s string;want uint64}{
+		{"524288",65536},{"512kbps",65536},{"1.5m",196608},{" 1 Gbps ",134217728},
+	}{
+		got,e:=parseBrutalBandwidth(v.s);if e!=nil||got!=v.want{t.Fatalf("%s: %d %v",v.s,got,e)}
+	}
+	for _,s:=range []string{"NaN","Inf","-1m","1e8","1.2.3m","2mb/s","10gbps"}{
+		if _,e:=parseBrutalBandwidth(s);e==nil{t.Fatalf("accepted %s",s)}
 	}
 }
