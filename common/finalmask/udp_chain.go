@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/sagernet/sing-box/option"
+	M "github.com/sagernet/sing/common/metadata"
 	"github.com/sagernet/sing-box/common/finalmask/sudoku"
 	"golang.org/x/crypto/blake2b"
 )
@@ -20,7 +21,7 @@ const (
 )
 
 type UDPChain struct { masks []udpMask }
-type udpMask struct { password []byte; geckoMin,geckoMax int; noise *udpNoiseConfig; header *udpHeaderConfig; sudoku *sudoku.Mask; legacy *udpLegacyConfig }
+type udpMask struct { password []byte; geckoMin,geckoMax int; noise *udpNoiseConfig; header *udpHeaderConfig; sudoku *sudoku.Mask; legacy *udpLegacyConfig; xdns *xdnsConfig }
 type salamanderSettings struct { Password string `json:"password"`; PacketSize json.RawMessage `json:"packetSize,omitempty"` }
 
 // NewUDPChain validates the supported client subset. Reject unsupported
@@ -43,6 +44,11 @@ func NewUDPChain(opts []option.LXFinalMaskUDPMaskOptions)(*UDPChain,error){
 			if err!=nil || (hi>0 && lo==0) {return nil,errors.New("finalmask_udp: invalid gecko packetSize")}
 			m.password=[]byte(settings.Password)
 			m.geckoMin,m.geckoMax=lo,hi
+		case "xdns":
+			if len(opts)!=1{return nil,errors.New("XDNS composition not validated")}
+			cfg,err:=compileXDNS(o.Settings)
+			if err!=nil{return nil,fmt.Errorf("finalmask_udp[%d]: %w",i,err)}
+			m.xdns=cfg
 		case "mkcp-legacy":
 			if len(opts)!=1{return nil,errors.New("UDP mkcp-legacy composition not validated")}
 			cfg,err:=compileUDPLegacy(o.Settings)
@@ -77,6 +83,7 @@ func(c *UDPChain) WrapConnected(raw net.Conn)net.Conn{
 	conn:=raw
 	for i:=len(c.masks)-1;i>=0;i--{
 		m:=c.masks[i]
+		if m.xdns!=nil{conn=newXDNSConn(conn,m.xdns);continue}
 		if m.legacy!=nil{conn=&udpLegacyConn{Conn:conn,config:m.legacy};continue}
 		if m.sudoku!=nil{conn=m.sudoku.WrapUDP(conn);continue}
 		if m.noise!=nil{conn=newUDPNoiseConn(conn,m.noise);continue}
@@ -131,4 +138,14 @@ func(c *salamanderUDPConn)Read(p []byte)(int,error){
 		salamanderXOR(c.password,c.rbuf[:salamanderSalt],body,body)
 		return copy(p,body),nil
 	}
+}
+
+// DialDestination replaces the carrier destination only for XDNS. The
+// caller still uses its own configured dialer, preserving detours and policy.
+func(c *UDPChain)DialDestination(server M.Socksaddr)M.Socksaddr{
+	if c!=nil&&len(c.masks)==1&&c.masks[0].xdns!=nil{return c.masks[0].xdns.resolver}
+	return server
+}
+func(c *UDPChain)ReplacesCarrier()bool{
+	return c!=nil&&len(c.masks)==1&&c.masks[0].xdns!=nil
 }

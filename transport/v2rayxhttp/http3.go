@@ -163,13 +163,14 @@ func newHTTP3Transport(dialer N.Dialer, serverAddr M.Socksaddr, tlsConfig tls.Co
 				var quicConn *quic.Conn
 				err := sniffGuard.Dial(ctx, func(ctx context.Context) error {
 					ctx, carrier := adapter.ContextWithCarrierRecord(ctx)
-					packetConn, err := dialer.DialContext(ctx, N.NetworkUDP, serverAddr)
+					packetConn, err := dialer.DialContext(ctx, N.NetworkUDP, mask.DialDestination(serverAddr))
 					if err != nil {
 						return E.Cause(err, "v2ray-xhttp: HTTP/3 needs UDP to the server")
 					}
 					dialled := packetConn
 					if mask != nil { packetConn = mask.WrapConnected(packetConn) }
-					handshakeConn, handshake := lxdatagram.GuardQUIC(lxsniffguard.AttemptFromContext(ctx), dialled, carrier, packetConn, logger)
+					handshakeConn, handshake := packetConn, (*lxdatagram.QUICHandshake)(nil)
+					if !mask.ReplacesCarrier(){handshakeConn,handshake=lxdatagram.GuardQUIC(lxsniffguard.AttemptFromContext(ctx), dialled, carrier, packetConn, logger)}
 					attemptConn, err := quic.DialEarlyConn(ctx, handshakeConn, stdConfig.Clone(), quicConfig)
 					handshake.Done()
 					if err != nil {

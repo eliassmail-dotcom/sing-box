@@ -106,6 +106,12 @@ Reference: Xray-core v26.11.9, transport/internet/finalmask/fragment/conn.go and
 - Connected datagrams, bounded 4096-byte wire frames, independent locks and scratch buffers, no background goroutines. Invalid original/AES frames are dropped; fixed headers are stripped without validation as upstream. DNS accepts ordinary nonempty labels only.
 - Standalone mask only until combination and overhead budgets are verified. Tests include header vectors, counter progression, original and AES reference decoding, corrupt packet rejection and size guards. Full external Xray interoperability and device measurements remain pending.
 
+## Stage 17 — XDNS UDP/TXT pilot
+
+- One explicit literal-IP UDP resolver, one ASCII domain, TXT queries and answers only. EDNS0 2048–4096 required for QUIC; TCP/DoH, A/AAAA/CNAME, multiple resolvers and mask composition rejected. Uses existing configured dialer to the resolver rather than the original QUIC address. XHTTP QUIC sniff shaping is skipped only for this replacement carrier.
+- Upstream-compatible client ID, query nonce, base32 domain labels, fragmentation and TXT response framing; pending query ring (256), reply queue (8), two lazy workers per connection. Polling backs off 500ms–10s. Replies match outstanding ID and question. No external resolver or production network is contacted by tests.
+- Local reference test checks fragmented writes and a full-size TXT reply. External Xray, loss/throughput and mobile resource tests remain mandatory. This is not full XDNS parity.
+
 ## Remaining scope (not implemented)
 
 1. Verify pinned upstream parser, all fragment options, mask ordering and error semantics. Finish numeric write ranges and raw transport integration; verify full-stack cancellation and resource tests. Document deliberate divergences from Xray (including zero-length TLS records and incomplete initial writes).
