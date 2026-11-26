@@ -148,3 +148,7 @@ Explicit exclusive tlsConfig.alpn=["h3"] selects HTTP/3 in with_quic builds; oth
 ## Stage 23 — XICMP client pilot
 
 Single selected literal IPv4/IPv6 endpoint per session, optional list up to four IPs. Uses explicit direct dialer ICMP socket capability and existing ICMPControl; resolver wrappers only forward that capability, detours fail closed. Unix raw and datagram socket paths, no privilege escalation or automatic raw fallback. Windows/other builds explicitly reject at dial until supported. No network namespace support in this pilot. Client ID, echo type/sequence, peer filtering, own echo rejection and bounded buffers follow Xray framing. No additional worker goroutines. Tests use local reference sockets; raw/datagram OS permissions, real Xray server and iOS Network Extension behavior remain unverified.
+
+## Stage 24 — Realm client pilot
+
+Reuses sing-quic hysteria2/realm Discover, ControlClient, Punch and metadata codec. Explicit realm://token@literal-IP/id HTTPS endpoint, verified TLS (optional serverName), up to four literal STUN servers, single selected IP family (v4/v6 or first STUN family in dual), at most four returned peers. Both HTTP and UDP use the configured dialer; no system DNS lookup or automatic port mapping. Overall setup deadline 20s, HTTP response body 16 KiB, close-on-cancel and failure, same UDP socket retained for data. Peer source filtered, late punch packets dropped. No persistent worker introduced by this adapter. Port mapping, full dual-family race, hostname resolution, combinations and external Xray tests remain pending.
