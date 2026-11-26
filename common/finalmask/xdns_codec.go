@@ -26,6 +26,9 @@ var xdnsBase32=base32.StdEncoding.WithPadding(base32.NoPadding)
 type xdnsConfig struct{
 	resolver M.Socksaddr
 	network string
+	dohURL, dohServerName string
+	dohWorkers int
+	dohALPN []string
 	domain string
 	types []dnsmessage.Type
 	labelLimit,capacity,edns,extraPoll int
@@ -43,6 +46,11 @@ func compileXDNS(raw json.RawMessage)(*xdnsConfig,error){
 		Resolvers []struct{
 			Addrs []string `json:"addrs"`
 			Worker int `json:"worker"`
+			TLS *struct{
+				ServerName string `json:"serverName"`
+				ALPN []string `json:"alpn"`
+				AllowInsecure bool `json:"allowInsecure"`
+			} `json:"tlsConfig"`
 		} `json:"resolvers"`
 		ExtraPoll int `json:"extraPoll"`
 	}
@@ -64,11 +72,15 @@ func compileXDNS(raw json.RawMessage)(*xdnsConfig,error){
 	address:=r.Addrs[0]
 	if !strings.Contains(address,"://"){address="udp://"+address}
 	u,err:=url.Parse(address)
-	if err!=nil||(u.Scheme!="udp"&&u.Scheme!="tcp")||u.User!=nil||u.Path!=""||u.RawQuery!=""||u.Fragment!=""{return nil,errors.New("XDNS requires a UDP or TCP resolver address")}
+	if err!=nil||u.User!=nil||u.Fragment!=""||u.Hostname()==""{return nil,errors.New("invalid XDNS resolver address")}
+	if u.Scheme!="udp"&&u.Scheme!="tcp"&&u.Scheme!="https"{return nil,errors.New("unsupported XDNS resolver scheme")}
+	if u.Scheme!="https"&&(u.Path!=""||u.RawQuery!=""||r.TLS!=nil){return nil,errors.New("invalid plain XDNS resolver options")}
+	if u.Scheme=="https"&&(u.Path==""||u.RawQuery!=""){return nil,errors.New("XDNS DoH requires explicit HTTPS path without query")}
+	if r.TLS!=nil&&r.TLS.AllowInsecure{return nil,errors.New("XDNS DoH requires TLS verification")}
 	ip,err:=netip.ParseAddr(u.Hostname())
 	if err!=nil||ip.Zone()!=""||ip.IsUnspecified(){return nil,errors.New("XDNS pilot requires a literal resolver IP")}
 	port:=u.Port()
-	if port==""{port="53"}
+	if port==""{port="53";if u.Scheme=="https"{port="443"}}
 	p,err:=strconv.Atoi(port)
 	if err!=nil||p<1||p>65535{return nil,errors.New("invalid XDNS resolver port")}
 	domain:=strings.ToLower(d.Names[0])
@@ -89,7 +101,18 @@ func compileXDNS(raw json.RawMessage)(*xdnsConfig,error){
 		capacity=n
 	}
 	if capacity<32{return nil,errors.New("XDNS domain capacity too small")}
-	return &xdnsConfig{resolver:M.ParseSocksaddr(net.JoinHostPort(ip.String(),port)),network:u.Scheme,domain:domain,types:types,labelLimit:d.LabelLimit,capacity:capacity,edns:d.EDNS,extraPoll:s.ExtraPoll},nil
+	cfg:=&xdnsConfig{resolver:M.ParseSocksaddr(net.JoinHostPort(ip.String(),port)),network:u.Scheme,domain:domain,types:types,labelLimit:d.LabelLimit,capacity:capacity,edns:d.EDNS,extraPoll:s.ExtraPoll}
+	if u.Scheme=="https"{
+		cfg.dohURL=u.String();cfg.dohWorkers=r.Worker
+		if cfg.dohWorkers==0{cfg.dohWorkers=4}
+		if cfg.dohWorkers>4{return nil,errors.New("XDNS DoH supports at most four workers")}
+		if r.TLS!=nil{
+			cfg.dohServerName=r.TLS.ServerName;cfg.dohALPN=r.TLS.ALPN
+			if len(cfg.dohALPN)>2{return nil,errors.New("invalid XDNS DoH ALPN")}
+			for _,v:=range cfg.dohALPN{if v!="h2"&&v!="http/1.1"{return nil,errors.New("XDNS DoH supports HTTP/1.1 and HTTP/2 only")}}
+		}
+	}
+	return cfg,nil
 }
 
 func(c *xdnsConfig)name(data []byte)(dnsmessage.Name,error){

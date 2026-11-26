@@ -1,6 +1,7 @@
 package finalmask
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/sagernet/sing-box/option"
 	M "github.com/sagernet/sing/common/metadata"
+	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing-box/common/finalmask/sudoku"
 	"golang.org/x/crypto/blake2b"
 )
@@ -157,4 +159,11 @@ func(c *UDPChain)ReplacesCarrier()bool{
 func(c *UDPChain)DialNetwork()string{
 	if c.ReplacesCarrier(){return c.masks[0].xdns.network}
 	return "udp"
+}
+
+func(c *UDPChain)DialCarrier(ctx context.Context,dialer N.Dialer,server M.Socksaddr)(net.Conn,error){
+	if c.ReplacesCarrier()&&c.masks[0].xdns.network=="https"{
+		return newXDNSDoHConn(ctx,dialer,c.masks[0].xdns),nil
+	}
+	return dialer.DialContext(ctx,c.DialNetwork(),c.DialDestination(server))
 }
