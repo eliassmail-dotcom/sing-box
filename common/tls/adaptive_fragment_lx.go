@@ -36,6 +36,17 @@ func NewAdaptiveRealityDialerLx(dialer N.Dialer, config Config, options option.O
 	}
 }
 
+// NewAdaptiveRealityDialerLx must be the ONLY producer of an armed dialer.
+//
+// AdaptiveRecordFragmentEnabledLx reports whether this dialer was built by
+// NewAdaptiveRealityDialerLx with record fragmentation armed, as opposed to the
+// plain NewDialer result. The flag itself is unexported; this probe is the
+// verification surface for the F3 activation test through the standard VLESS
+// construction path (peer review #11).
+func (d *defaultDialer) AdaptiveRecordFragmentEnabledLx() bool {
+	return d.adaptiveRecordFragment
+}
+
 func applyAdaptiveFragmentModeLx(ctx context.Context, config Config) {
 	if adapter.AdaptiveRecordFragmentRaceLx(ctx) && adapter.AdaptiveRecordFragmentModeLx(ctx) {
 		if reality, ok := config.(interface{ setAdaptiveRecordFragmentLx() }); ok {

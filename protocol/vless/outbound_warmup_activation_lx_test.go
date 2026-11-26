@@ -103,6 +103,12 @@ func TestVLESSAdaptiveWarmupActivatesWithCoordinator(t *testing.T) {
 	v := outbound.(*Outbound)
 	require.NotNil(t, v.ipWarmup, "coordinator must be picked up from the context")
 	require.True(t, v.IPWarmupEligible(), "F1 eligibility + F3 adaptive dialer must activate with the coordinator present")
+	// Peer review #11: F1 eligibility alone does not prove F3. Assert the
+	// actual adaptive dial path: the standard construction must wrap the TLS
+	// dialer in the adaptive REALITY dialer with record fragmentation armed.
+	adaptive, ok := v.tlsDialer.(interface{ AdaptiveRecordFragmentEnabledLx() bool })
+	require.True(t, ok, "tlsDialer must be the adaptive REALITY dialer")
+	require.True(t, adaptive.AdaptiveRecordFragmentEnabledLx(), "F3 adaptive record fragmentation must be armed")
 }
 
 func TestVLESSAdaptiveWarmupInactiveWithoutCoordinator(t *testing.T) {
@@ -114,6 +120,9 @@ func TestVLESSAdaptiveWarmupInactiveWithoutCoordinator(t *testing.T) {
 	v := outbound.(*Outbound)
 	require.Nil(t, v.ipWarmup)
 	require.False(t, v.IPWarmupEligible())
+	adaptive, ok := v.tlsDialer.(interface{ AdaptiveRecordFragmentEnabledLx() bool })
+	require.True(t, ok)
+	require.False(t, adaptive.AdaptiveRecordFragmentEnabledLx(), "without the coordinator the plain dialer must stay unarmed")
 }
 
 // lx:end adaptive-warmup
