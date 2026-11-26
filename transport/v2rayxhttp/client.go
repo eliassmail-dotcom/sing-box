@@ -150,7 +150,7 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 	// given stream (SPECS/TASKS/059).
 	realityEnabled := tlsConfigIsReality(tlsConfig)
 	version := decideHTTPVersion(tlsConfig, realityEnabled)
-	if len(options.FinalMaskUDP) != 0 && version != httpVersion3 { return nil, E.New("finalmask_udp requires XHTTP over HTTP/3") }
+	if (len(options.FinalMaskUDP) != 0 || options.QUICParams != nil) && version != httpVersion3 { return nil, E.New("finalmask_udp requires XHTTP over HTTP/3") }
 	udpMask, err := finalmask.NewUDPChain(options.FinalMaskUDP)
 	if err != nil { return nil, err }
 	var (
@@ -162,7 +162,7 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 		scheme = "https"
 		// lx: SPEC 060 — lx.sniff_guard for the node this transport serves.
 		sniffGuard := lxsniffguard.FromContext(ctx).Node(adapter.OutboundTagFromContext(ctx))
-		newConn, err = newHTTP3Transport(dialer, serverAddr, tlsConfig, xmuxConfig.keepAlivePeriod, warn, sniffGuard, logger, udpMask)
+		newConn, err = newHTTP3TransportWithParams(dialer, serverAddr, tlsConfig, xmuxConfig.keepAlivePeriod, warn, sniffGuard, logger, options.QUICParams, udpMask)
 		if err != nil {
 			return nil, err
 		}

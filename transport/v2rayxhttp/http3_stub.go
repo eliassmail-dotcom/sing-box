@@ -8,6 +8,7 @@ import (
 	"github.com/sagernet/sing-box/common/lxsniffguard"
 	"github.com/sagernet/sing-box/common/tls"
 	"github.com/sagernet/sing-box/common/finalmask"
+	"github.com/sagernet/sing-box/option"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
@@ -22,4 +23,8 @@ func newHTTP3Transport(N.Dialer, M.Socksaddr, tls.Config, time.Duration, func(st
 
 func hideQUICError(err error) error {
 	return err
+}
+
+func newHTTP3TransportWithParams(N.Dialer, M.Socksaddr, tls.Config, time.Duration, func(string), *lxsniffguard.Node, logger.Logger, *option.LXFinalMaskQUICParams, ...*finalmask.UDPChain) (func() xmuxConn, error) {
+	return nil, E.New("v2ray-xhttp: HTTP/3 requires with_quic")
 }

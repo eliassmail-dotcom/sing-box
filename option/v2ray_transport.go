@@ -114,6 +114,7 @@ type V2RayWebsocketOptions struct {
 
 type V2RayQUICOptions struct {
 	FinalMaskUDP []LXFinalMaskUDPMaskOptions `json:"finalmask_udp,omitempty"`
+	QUICParams *LXFinalMaskQUICParams `json:"quic_params,omitempty"`
 }
 
 type V2RayGRPCOptions struct {

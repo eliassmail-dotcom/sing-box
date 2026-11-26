@@ -21,6 +21,7 @@ import "github.com/sagernet/sing/common/json/badoption"
 // range type to the option layer.
 type V2RayXHTTPOptions struct {
 	FinalMaskUDP []LXFinalMaskUDPMaskOptions `json:"finalmask_udp,omitempty"`
+	QUICParams *LXFinalMaskQUICParams `json:"quic_params,omitempty"`
 
 	// ---- v1 fields (unchanged, preserved verbatim) --------------------------
 
