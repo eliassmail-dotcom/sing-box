@@ -113,3 +113,46 @@ func TestLXFinalMaskMaxSplitValidation(t *testing.T) {
 		if opts.Validate() == nil { t.Fatalf("accepted invalid max_split %q", value) }
 	}
 }
+
+func TestLXFinalMaskLengthSequence(t *testing.T) {
+	payload := bytes.Repeat([]byte{7}, 34)
+	payload[0] = 1
+	input := append([]byte{22, 3, 1, 0, byte(len(payload))}, payload...)
+	tail := []byte{20, 3, 3, 0, 1, 1}
+	input = append(input, tail...)
+	for _, tc := range []struct {
+		name string
+		maxSplit string
+		want []int
+	}{
+		{"repeat last", "", []int{4, 8, 8, 8, 6}},
+		{"cap", "3", []int{4, 8, 22}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := &option.LXFinalMaskFragmentOptions{Packets: "tlshello", Length: "99", Lengths: []string{"4", "8"}, Delay: "0", MaxSplit: tc.maxSplit}
+			if err := opts.Validate(); err != nil { t.Fatal(err) }
+			capture := &lxFinalMaskCapture{}
+			conn := newLXFinalMaskConn(capture, opts)
+			if n, err := conn.Write(input); err != nil || n != len(input) { t.Fatalf("write %d %v", n, err) }
+			if len(capture.writes) != 1 { t.Fatal("expected one write") }
+			wire := capture.writes[0]
+			var restored []byte
+			for _, size := range tc.want {
+				if len(wire) < 5+size || !bytes.Equal(wire[:3], input[:3]) || int(binary.BigEndian.Uint16(wire[3:5])) != size {
+					t.Fatalf("expected record size %d", size)
+				}
+				restored = append(restored, wire[5:5+size]...)
+				wire = wire[5+size:]
+			}
+			if !bytes.Equal(restored, payload) || !bytes.Equal(wire, tail) { t.Fatal("payload or tail mismatch") }
+		})
+	}
+}
+func TestLXFinalMaskLengthSequenceValidation(t *testing.T) {
+	for _, ranges := range [][]string{{"0", "4"}, {"4", "0"}, {"4", "9-3"}, {"4", "16385"}, {"4", ""}, make([]string, 257)} {
+		opts := &option.LXFinalMaskFragmentOptions{Packets: "tlshello", Lengths: ranges, Delay: "0"}
+		if opts.Validate() == nil { t.Fatalf("accepted invalid lengths %v", ranges) }
+	}
+	opts := &option.LXFinalMaskFragmentOptions{Packets: "tlshello", Lengths: []string{"2-3", "5-6"}, Delay: "0"}
+	if err := opts.Validate(); err != nil { t.Fatal(err) }
+}
