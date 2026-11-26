@@ -86,7 +86,7 @@ func(c *UDPChain) WrapConnected(raw net.Conn)net.Conn{
 	for i:=len(c.masks)-1;i>=0;i--{
 		m:=c.masks[i]
 		if m.xdns!=nil{
-			if m.xdns.network=="tcp"{conn=newXDNSTCPConn(conn)}
+			if m.xdns.network=="tcp"&&len(m.xdns.alternates)==0{conn=newXDNSTCPConn(conn)}
 			conn=newXDNSConn(conn,m.xdns);continue
 		}
 		if m.legacy!=nil{conn=&udpLegacyConn{Conn:conn,config:m.legacy};continue}
@@ -162,6 +162,9 @@ func(c *UDPChain)DialNetwork()string{
 }
 
 func(c *UDPChain)DialCarrier(ctx context.Context,dialer N.Dialer,server M.Socksaddr)(net.Conn,error){
+	if c.ReplacesCarrier()&&len(c.masks[0].xdns.alternates)>0{
+		return newXDNSMultiConn(ctx,dialer,c.masks[0].xdns)
+	}
 	if c.ReplacesCarrier()&&c.masks[0].xdns.network=="https"{
 		return newXDNSDoHConn(ctx,dialer,c.masks[0].xdns),nil
 	}

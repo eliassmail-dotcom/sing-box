@@ -25,6 +25,7 @@ var xdnsBase32=base32.StdEncoding.WithPadding(base32.NoPadding)
 
 type xdnsConfig struct{
 	resolver M.Socksaddr
+	alternates []*xdnsConfig
 	network string
 	dohURL, dohServerName string
 	dohWorkers int
@@ -34,8 +35,7 @@ type xdnsConfig struct{
 	labelLimit,capacity,edns,extraPoll int
 }
 
-func compileXDNS(raw json.RawMessage)(*xdnsConfig,error){
-	var s struct{
+type xdnsSettings struct{
 		Domains []struct{
 			Names []string `json:"names"`
 			LenLimit int `json:"lenLimit"`
@@ -54,8 +54,37 @@ func compileXDNS(raw json.RawMessage)(*xdnsConfig,error){
 		} `json:"resolvers"`
 		ExtraPoll int `json:"extraPoll"`
 	}
+
+func compileXDNS(raw json.RawMessage)(*xdnsConfig,error){
+	var s xdnsSettings
 	if err:=decodeMaskSettings(raw,&s);err!=nil{return nil,err}
-	if len(s.Domains)!=1||len(s.Domains[0].Names)!=1||len(s.Resolvers)!=1||len(s.Resolvers[0].Addrs)!=1{return nil,errors.New("XDNS pilot requires one domain and one resolver")}
+	if len(s.Domains)!=1||len(s.Domains[0].Names)!=1||len(s.Resolvers)==0||len(s.Resolvers)>3{return nil,errors.New("XDNS requires one domain and one to three resolvers")}
+	var entries []*xdnsConfig
+	workers:=0
+	seenResolvers:=make(map[string]bool)
+	for i,r:=range s.Resolvers{
+		if len(r.Addrs)==0||len(r.Addrs)>3{return nil,errors.New("invalid XDNS resolver address count")}
+		for _,addr:=range r.Addrs{
+			if len(entries)>=3{return nil,errors.New("XDNS supports at most three resolver addresses")}
+			single:=s
+			single.Resolvers=append(s.Resolvers[:0:0],s.Resolvers[i])
+			single.Resolvers[0].Addrs=[]string{addr}
+			cfg,err:=compileXDNSSingle(single)
+			if err!=nil{return nil,err}
+			key:=cfg.network+"|"+cfg.resolver.String()+"|"+cfg.dohURL
+			if seenResolvers[key]{return nil,errors.New("duplicate XDNS resolver")}
+			seenResolvers[key]=true
+			workers+=cfg.dohWorkers
+			if workers>4{return nil,errors.New("XDNS aggregate DoH worker budget exceeds four")}
+			entries=append(entries,cfg)
+		}
+	}
+	primary:=entries[0]
+	primary.alternates=entries[1:]
+	return primary,nil
+}
+
+func compileXDNSSingle(s xdnsSettings)(*xdnsConfig,error){
 	d,r:=s.Domains[0],s.Resolvers[0]
 	if len(d.Types)==0{d.Types=[]int{16}}
 	if len(d.Types)>4{return nil,errors.New("too many XDNS query types")}
