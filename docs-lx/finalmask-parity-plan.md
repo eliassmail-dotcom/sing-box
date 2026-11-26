@@ -176,3 +176,7 @@ HTTPS resolver URL may use an ASCII hostname when the resolver entry supplies ex
 ## Stage 30 — XDNS multi-domain
 
 Up to four names across up to four domain groups, each with independent type set, EDNS and encoding limits. Select one domain per datagram/poll, all fragments use that domain, pending entries retain the chosen codec for response validation. Duplicate and nested suffixes rejected to avoid ambiguous DNS routing. Single-domain defaults, resolver budgets and wire layout unchanged. Fragment ID increments only for fragmented datagrams (matches upstream). No extra workers or queues. All configured names must point to the same XDNS server/session state. External Xray and iOS resource tests remain pending.
+
+## Stage 32 — expanded acceptance gates
+
+Run the existing targeted suites plus four full-package race-detector suites under the Apple low-memory tag set, and native CLI cross-compilation for Linux amd64, Windows amd64, and Darwin arm64. Repeat carrier lifecycle tests five times. Added a separate experimental b44 IPA workflow based on the verified b41 packaging/signing gates, with Apple client pinned to the same b41 commit, no release publication and no production deployment. IPA workflow is triggered only by its dedicated build branch or manual dispatch; it is not started by this stage's push. Device Network Extension memory and real Xray server interoperability remain explicit acceptance requirements.
