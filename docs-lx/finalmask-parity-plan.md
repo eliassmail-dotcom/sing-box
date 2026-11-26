@@ -100,6 +100,12 @@ Reference: Xray-core v26.11.9, transport/internet/finalmask/fragment/conn.go and
 - Mobile pilot limits input to 2048 bytes and encoded wire datagrams to 18433 bytes (maximum expansion 9x plus final pad). Oversized and malformed incoming datagrams are discarded; short output buffers drop datagrams as upstream does. Write errors are explicit.
 - Only standalone Sudoku mask is allowed initially: other UDP wrappers currently have smaller wire budgets. Large encoded packets may undergo IP fragmentation or be dropped by the network; actual path MTU and device resource tests are mandatory before use. Tests cover reference codec both directions, table reset, maximum padding, invalid hints, oversize, deadlines, and configuration guards.
 
+## Stage 16 — mKCP Legacy UDP masks
+
+- Implements Xray v26.11.9 original FNV/length/XOR framing, AES-128-GCM with SHA-256-derived key, and DNS/DTLS/SRTP/uTP/WeChat/WireGuard header variants. This is not the mKCP transport.
+- Connected datagrams, bounded 4096-byte wire frames, independent locks and scratch buffers, no background goroutines. Invalid original/AES frames are dropped; fixed headers are stripped without validation as upstream. DNS accepts ordinary nonempty labels only.
+- Standalone mask only until combination and overhead budgets are verified. Tests include header vectors, counter progression, original and AES reference decoding, corrupt packet rejection and size guards. Full external Xray interoperability and device measurements remain pending.
+
 ## Remaining scope (not implemented)
 
 1. Verify pinned upstream parser, all fragment options, mask ordering and error semantics. Finish numeric write ranges and raw transport integration; verify full-stack cancellation and resource tests. Document deliberate divergences from Xray (including zero-length TLS records and incomplete initial writes).
