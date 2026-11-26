@@ -63,6 +63,13 @@ Reference: Xray-core v26.11.9, transport/internet/finalmask/fragment/conn.go and
 - Uses pinned RSA derivation, login/profile checks, CFB8 and packet/padding state machine. No auto-generated or network-fetched profiles. At most eight profiles, bounded profile fields, password and hostname. Failed client handshake becomes terminal and closes the connection.
 - Upstream tests run in a dedicated CI step, in addition to LX integration tests. Actual external Xray process interoperability and CPU/memory on iOS remain release gates.
 
+## Stage 10 — UDP Salamander pilot
+
+- Opt-in finalmask_udp list inside V2Ray QUIC or XHTTP HTTP/3 transport; currently only a single salamander entry with password, validated at load. Non-H3 XHTTP rejects it. Unsupported packetSize/Gecko and additional UDP masks fail explicitly.
+- Independent connected-datagram adapter follows Xray v26.11.9 Salamander salt/BLAKE2b-256/XOR wire format. No syscall bypass, no caller-buffer mutation, bounded 4096-byte wire datagrams and separate read/write locks and scratch buffers. Not authenticated encryption.
+- XHTTP keeps carrier classification on the original connection; QUIC guard sees the plaintext datagram and its writes pass through the mask. QUIC socket lifetime is unchanged. Native Hysteria2 obfuscation is unchanged.
+- Tests exercise UDP datagram framing and reference-peer interoperability, malformed short packets, invalid settings, and compile QUIC/XHTTP paths. Full external Xray and iOS resource tests remain pending.
+
 ## Remaining scope (not implemented)
 
 1. Verify pinned upstream parser, all fragment options, mask ordering and error semantics. Finish numeric write ranges and raw transport integration; verify full-stack cancellation and resource tests. Document deliberate divergences from Xray (including zero-length TLS records and incomplete initial writes).

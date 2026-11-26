@@ -12,6 +12,7 @@ import (
 	"github.com/sagernet/quic-go/http3"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/tls"
+	"github.com/sagernet/sing-box/common/finalmask"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-quic"
@@ -28,6 +29,7 @@ type Client struct {
 	serverAddr M.Socksaddr
 	tlsConfig  tls.Config
 	quicConfig *quic.Config
+	udpMask *finalmask.UDPChain
 	connAccess sync.Mutex
 	conn       common.TypedValue[*clientConnection]
 	rawConn    net.Conn
@@ -78,6 +80,8 @@ func (c *clientConnection) markClosedLocked() bool {
 }
 
 func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, options option.V2RayQUICOptions, tlsConfig tls.Config) (adapter.V2RayClientTransport, error) {
+	mask, err := finalmask.NewUDPChain(options.FinalMaskUDP)
+	if err != nil { return nil, err }
 	quicConfig := &quic.Config{
 		DisablePathMTUDiscovery: !C.IsLinux && !C.IsWindows,
 	}
@@ -90,6 +94,7 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 		serverAddr: serverAddr,
 		tlsConfig:  tlsConfig,
 		quicConfig: quicConfig,
+		udpMask: mask,
 	}, nil
 }
 
@@ -116,6 +121,7 @@ func (c *Client) offerNew() (*clientConnection, error) {
 	if err != nil {
 		return nil, err
 	}
+	if c.udpMask != nil { udpConn = c.udpMask.WrapConnected(udpConn) }
 	quicConn, err := qtls.Dial(c.ctx, udpConn, c.tlsConfig, c.quicConfig)
 	if err != nil {
 		udpConn.Close()

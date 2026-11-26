@@ -20,5 +20,8 @@ jobs:
         run: |
           go test -race -count=1 -timeout=8m -ldflags '-checklinkname=0' -tags 'with_utls with_lx_command' -run 'Test(LXFinalMask|LxRealityFinalMask)' ./common/tls/ ./common/finalmask/... ./option/ ./protocol/vless/
 
+      - name: QUIC and XHTTP integration gate
+        run: go test -race -count=1 -timeout=8m -ldflags '-checklinkname=0' -tags 'with_utls with_quic with_xhttp with_lx_command' -run 'TestLXFinalMask' ./transport/v2rayquic/ ./transport/v2rayxhttp/ ./common/finalmask/ ./option/
+
       - name: Original Xray XMC regression suite
         run: go test -race -count=1 -timeout=8m ./common/finalmask/xmc/

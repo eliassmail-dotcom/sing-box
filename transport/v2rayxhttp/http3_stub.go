@@ -7,6 +7,7 @@ import (
 
 	"github.com/sagernet/sing-box/common/lxsniffguard"
 	"github.com/sagernet/sing-box/common/tls"
+	"github.com/sagernet/sing-box/common/finalmask"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
@@ -15,7 +16,7 @@ import (
 
 // lx: SPEC 104 — without quic-go a config the version rule sends to HTTP/3 is
 // refused at load.
-func newHTTP3Transport(N.Dialer, M.Socksaddr, tls.Config, time.Duration, func(string), *lxsniffguard.Node, logger.Logger) (func() xmuxConn, error) {
+func newHTTP3Transport(N.Dialer, M.Socksaddr, tls.Config, time.Duration, func(string), *lxsniffguard.Node, logger.Logger, ...*finalmask.UDPChain) (func() xmuxConn, error) {
 	return nil, E.New(`v2ray-xhttp: HTTP/3 (tls.alpn ["h3"]) requires the with_quic build tag`)
 }
 

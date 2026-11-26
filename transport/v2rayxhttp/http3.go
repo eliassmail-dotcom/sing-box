@@ -19,6 +19,7 @@ import (
 	"github.com/sagernet/sing-box/common/lxdatagram"
 	"github.com/sagernet/sing-box/common/lxsniffguard"
 	"github.com/sagernet/sing-box/common/tls"
+	"github.com/sagernet/sing-box/common/finalmask"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
@@ -102,7 +103,9 @@ func http3PathMTUDiscovery() bool {
 
 // newHTTP3Transport returns the factory of pooled HTTP/3 connections. warn
 // receives the load-time warnings of SPEC 104 §6.
-func newHTTP3Transport(dialer N.Dialer, serverAddr M.Socksaddr, tlsConfig tls.Config, keepAlivePeriod time.Duration, warn func(string), sniffGuard *lxsniffguard.Node, logger logger.Logger) (func() xmuxConn, error) {
+func newHTTP3Transport(dialer N.Dialer, serverAddr M.Socksaddr, tlsConfig tls.Config, keepAlivePeriod time.Duration, warn func(string), sniffGuard *lxsniffguard.Node, logger logger.Logger, masks ...*finalmask.UDPChain) (func() xmuxConn, error) {
+	var mask *finalmask.UDPChain
+	if len(masks) > 0 { mask = masks[0] }
 	stdConfig, fromUTLS, err := tls.STDConfigForQUIC(tlsConfig)
 	var dialErr error
 	if err != nil {
@@ -164,7 +167,9 @@ func newHTTP3Transport(dialer N.Dialer, serverAddr M.Socksaddr, tlsConfig tls.Co
 					if err != nil {
 						return E.Cause(err, "v2ray-xhttp: HTTP/3 needs UDP to the server")
 					}
-					handshakeConn, handshake := lxdatagram.GuardQUIC(lxsniffguard.AttemptFromContext(ctx), packetConn, carrier, packetConn, logger)
+					dialled := packetConn
+					if mask != nil { packetConn = mask.WrapConnected(packetConn) }
+					handshakeConn, handshake := lxdatagram.GuardQUIC(lxsniffguard.AttemptFromContext(ctx), dialled, carrier, packetConn, logger)
 					attemptConn, err := quic.DialEarlyConn(ctx, handshakeConn, stdConfig.Clone(), quicConfig)
 					handshake.Done()
 					if err != nil {
