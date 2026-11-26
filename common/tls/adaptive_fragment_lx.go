@@ -5,9 +5,9 @@ import (
 	"errors"
 	"io"
 	"net"
-	"syscall"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/lxnet"
 	"github.com/sagernet/sing-box/common/lxsniffguard"
 	"github.com/sagernet/sing-box/option"
 	N "github.com/sagernet/sing/common/network"
@@ -62,7 +62,7 @@ func classifyRealityTransportFailureLx(ctx context.Context, err error) error {
 	}
 	var timeout net.Error
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
-		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, context.DeadlineExceeded) ||
+		lxnet.IsConnReset(err) || errors.Is(err, context.DeadlineExceeded) ||
 		(errors.As(err, &timeout) && timeout.Timeout()) {
 		return lxRealityTransportFailure{err}
 	}

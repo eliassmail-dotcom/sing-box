@@ -1,6 +1,4 @@
-//go:build with_lx_idle_suspend
-
-// lx:begin idle-suspend
+// lx:begin reachability-walk
 package route
 
 import (
@@ -38,7 +36,7 @@ func (s *stubSelector) Selected(string) adapter.Outbound {
 }
 func (s *stubSelector) AttachConnection(io.Closer) func() { return func() {} }
 
-// stubURLTest implements reachableActiveTags — its whole active pool is reachable.
+// stubURLTest implements reachableActiveTags вЂ” its whole active pool is reachable.
 type stubURLTest struct {
 	stubOutbound
 	active []string
@@ -108,7 +106,7 @@ func TestReachableDetourChain(t *testing.T) {
 }
 
 func TestReachableSelectorOnlyNow(t *testing.T) {
-	// selector picks "wg-a"; "wg-b" is a member but NOT selected → unreachable.
+	// selector picks "wg-a"; "wg-b" is a member but NOT selected в†’ unreachable.
 	resolve := resolverFrom(
 		&stubSelector{stubOutbound: stubOutbound{tag: "sel"}, now: "wg-a", all: []string{"wg-a", "wg-b"}},
 		&stubOutbound{tag: "wg-a"},
@@ -125,7 +123,7 @@ func TestReachableURLTestWholePool(t *testing.T) {
 		&stubOutbound{tag: "wg-a"},
 		&stubOutbound{tag: "wg-b"},
 		&stubOutbound{tag: "wg-c"},
-		&stubOutbound{tag: "wg-idle"}, // not in pool → must be unreachable
+		&stubOutbound{tag: "wg-idle"}, // not in pool в†’ must be unreachable
 	)
 	got := reachableSet([]string{"ut"}, resolve)
 	assertReachable(t, got, "ut", "wg-a", "wg-b", "wg-c")
@@ -186,7 +184,7 @@ func TestReachableMultipleSeeds(t *testing.T) {
 // (vpn-1 selector whose Now() is the nested vpn-1-auto urltest): a selector whose
 // active choice is a round_robin urltest must descend into the urltest's WHOLE
 // active pool, not just one node. A non-selected sibling member stays unreachable.
-// Live-verified: switching vpn-1 → vpn-1-auto woke exactly the pool:4 members.
+// Live-verified: switching vpn-1 в†’ vpn-1-auto woke exactly the pool:4 members.
 func TestReachableSelectorToURLTestPool(t *testing.T) {
 	resolve := resolverFrom(
 		&stubSelector{stubOutbound: stubOutbound{tag: "vpn-1"}, now: "vpn-auto", all: []string{"vpn-auto", "wg-x"}},
@@ -195,14 +193,14 @@ func TestReachableSelectorToURLTestPool(t *testing.T) {
 		&stubOutbound{tag: "wg-b"},
 		&stubOutbound{tag: "wg-c"},
 		&stubOutbound{tag: "wg-d"},
-		&stubOutbound{tag: "wg-x"},    // selector member, not Now → unreachable
-		&stubOutbound{tag: "wg-idle"}, // nobody → unreachable
+		&stubOutbound{tag: "wg-x"},    // selector member, not Now в†’ unreachable
+		&stubOutbound{tag: "wg-idle"}, // nobody в†’ unreachable
 	)
 	got := reachableSet([]string{"vpn-1"}, resolve)
 	assertReachable(t, got, "vpn-1", "vpn-auto", "wg-a", "wg-b", "wg-c", "wg-d")
 }
 
-// TestReachableDualPathDedup covers a node reachable via two seeds at once — the
+// TestReachableDualPathDedup covers a node reachable via two seeds at once вЂ” the
 // user's WARP-1 is both vpn-1's Now() and vpn-3's default. The visited set must
 // dedup (mark once, expand once) and the node must be reachable. Live-verified.
 func TestReachableDualPathDedup(t *testing.T) {
@@ -210,10 +208,10 @@ func TestReachableDualPathDedup(t *testing.T) {
 		&stubSelector{stubOutbound: stubOutbound{tag: "vpn-1"}, now: "warp-1", all: []string{"warp-1", "home"}},
 		&stubSelector{stubOutbound: stubOutbound{tag: "vpn-3"}, now: "warp-1", all: []string{"warp-1", "warp-2"}},
 		&stubOutbound{tag: "warp-1"},
-		&stubOutbound{tag: "home"},   // vpn-1 member, not Now → unreachable
-		&stubOutbound{tag: "warp-2"}, // vpn-3 member, not Now → unreachable
+		&stubOutbound{tag: "home"},   // vpn-1 member, not Now в†’ unreachable
+		&stubOutbound{tag: "warp-2"}, // vpn-3 member, not Now в†’ unreachable
 	)
-	// Two seeds (final=vpn-1, rule→vpn-3) both reach warp-1.
+	// Two seeds (final=vpn-1, ruleв†’vpn-3) both reach warp-1.
 	got := reachableSet([]string{"vpn-1", "vpn-3"}, resolve)
 	assertReachable(t, got, "vpn-1", "vpn-3", "warp-1")
 }
@@ -231,8 +229,8 @@ func TestReachableSelectorMemberIsURLTestNotSelected(t *testing.T) {
 		&stubOutbound{tag: "wg-b"},
 	)
 	got := reachableSet([]string{"vpn-1"}, resolve)
-	// vpn-auto and its pool (wg-a, wg-b) must NOT appear — nested dormant subtree.
+	// vpn-auto and its pool (wg-a, wg-b) must NOT appear вЂ” nested dormant subtree.
 	assertReachable(t, got, "vpn-1", "warp-1")
 }
 
-// lx:end idle-suspend
+// lx:end reachability-walk

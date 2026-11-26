@@ -4,7 +4,8 @@ import (
 	"context"
 	"errors"
 	"net"
-	"syscall"
+
+	"github.com/sagernet/sing-box/common/lxnet"
 )
 
 // Only definitive TCP refusals and explicit authenticated-protocol failures
@@ -66,7 +67,7 @@ func dialVerifiedCandidateLx(
 		if err == nil {
 			return nil, errors.New("tcp_concurrent: dial returned no connection")
 		}
-		if adaptive && errors.Is(err, syscall.ECONNREFUSED) {
+		if adaptive && lxnet.IsConnRefused(err) {
 			err = lxDefinitiveTCPFailure{err}
 		}
 		return nil, err

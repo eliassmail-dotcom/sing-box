@@ -35,8 +35,8 @@ func (r *Router) startIdleSuspend() error {
 // stopIdleSuspend is a no-op without the tag (no tick goroutine was ever started).
 func (r *Router) stopIdleSuspend() {}
 
-// No reachability graph in this build: decline speculative warmup.
-func (r *Router) IPWarmupReachableTags() map[string]bool { return nil }
+// IPWarmupReachableTags needs no stub: the real walk lives in the always-compiled
+// reachability_walk_lx.go (peer review #10 — Windows warmup), not behind the tag.
 
 // OutboundReachable implements adapter.ReachabilityReporter. Without the tag no
 // endpoint is ever idle-suspended, so probe gating must never engage: everything

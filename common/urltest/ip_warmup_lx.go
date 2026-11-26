@@ -32,6 +32,20 @@ type ipWarmupProbeTracker interface {
 
 type ipWarmupURLTestKey struct{}
 
+// IPWarmupSupportedOS reports whether box.New creates the one-shot
+// authenticated IP warmup coordinator (b41 F1). iOS since b40 — the original
+// QA scope; Windows since peer review #10: the cycle is platform-neutral (no
+// pause manager on desktop simply means no pause-driven early stop, and the
+// reachability walk is compiled in every build). Android stays off pending an
+// explicit owner decision.
+func IPWarmupSupportedOS() bool {
+	switch runtime.GOOS {
+	case "ios", "windows":
+		return true
+	}
+	return false
+}
+
 // One coordinator per iOS Box, no periodic timer. Ordinary URLTests and
 // traffic only register intent/cancel optional work; they never wait on slots.
 type IPWarmupCoordinator struct {
