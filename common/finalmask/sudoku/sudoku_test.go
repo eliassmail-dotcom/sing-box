@@ -62,3 +62,19 @@ func TestLXFinalMaskSudokuValidation(t *testing.T){
 		if _,err:=New(&c);err==nil{t.Fatalf("accepted invalid config %+v",c)}
 	}
 }
+
+func TestLXFinalMaskSudokuReadDeadlineRecovery(t *testing.T){
+	m,err:=New(&Config{Password:"deadline"});if err!=nil{t.Fatal(err)}
+	raw,peer:=net.Pipe()
+	client,server:=m.WrapClient(raw),m.WrapServer(peer)
+	defer client.Close();defer server.Close()
+	client.SetReadDeadline(time.Now().Add(-time.Millisecond))
+	if _,err:=client.Read(make([]byte,1));err==nil{t.Fatal("expected timeout")}else if ne,ok:=err.(net.Error);!ok||!ne.Timeout(){t.Fatal(err)}
+	client.SetReadDeadline(time.Now().Add(time.Second))
+	server.SetWriteDeadline(time.Now().Add(time.Second))
+	done:=make(chan error,1)
+	go func(){_,err:=server.Write([]byte("recovered"));done<-err}()
+	b:=make([]byte,9)
+	if _,err:=io.ReadFull(client,b);err!=nil||string(b)!="recovered"{t.Fatalf("read %q %v",b,err)}
+	if err:=<-done;err!=nil{t.Fatal(err)}
+}

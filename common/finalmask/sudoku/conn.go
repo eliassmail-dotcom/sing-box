@@ -43,7 +43,13 @@ func(c *maskedConn)Read(p []byte)(int,error){
 	c.rmu.Lock();defer c.rmu.Unlock()
 	var raw [chunkSize]byte
 	for len(c.pending)==0 {
-		if c.readErr!=nil{return 0,c.readErr}
+		if c.readErr!=nil{
+			err:=c.readErr
+			// Socket deadlines are recoverable. Preserve decoder state and
+			// deliver the timeout once, allowing a later deadline reset.
+			if ne,ok:=err.(net.Error);ok&&ne.Timeout(){c.readErr=nil}
+			return 0,err
+		}
 		n,err:=c.Conn.Read(raw[:])
 		if n>0{
 			out,decodeErr:=c.dec.decodeChunk(raw[:n],c.pending[:0])
