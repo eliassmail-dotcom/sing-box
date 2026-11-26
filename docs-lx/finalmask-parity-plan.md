@@ -28,7 +28,7 @@ Reference: Xray-core v26.11.9, transport/internet/finalmask/fragment/conn.go and
 
 - Supports Xray client/server round ordering, static byte array/string/hex/base64 packets, random bytes, random value ranges, and sending delays. A matching server is required.
 - Opt-in finalmask_tcp_header on plain VLESS. Eager bounded exchange after dialing, before encryption and payload; context cancellation closes failed connections. Existing dialer interfaces are untouched.
-- Intentionally rejects capture/reuse/transform, error sequences, simultaneous legacy fragment+header fields, TLS/REALITY and other transports. These are not silently ignored. Limits: 16 KiB total header, 256 items/rounds and five-second handshake.
+- Initially rejected capture/reuse/transform and still rejects transforms and error sequences, simultaneous legacy fragment+header fields, TLS/REALITY and other transports. These are not silently ignored. Limits: 16 KiB total header, 256 items/rounds and five-second handshake.
 - Tests use a manual reference peer, not an actual Xray binary; upstream interoperability is still a release gate.
 
 ## Stage 5 — ordered TCP mask chain pilot
@@ -37,6 +37,12 @@ Reference: Xray-core v26.11.9, transport/internet/finalmask/fragment/conn.go and
 - Supports numeric and string fragment range forms, maxSplit and legacy max_split aliases (not simultaneously), strict rejection of unknown settings. Existing single-mask fields continue unchanged and cannot be combined with the list.
 - Limited to plain VLESS, at most one instance of each mask to avoid multiplicative write budgets. Header exchange remains eager; no upstream binary interop claim. Unsupported masks fail explicitly.
 - Both VLESS dial paths apply the ordered chain before protocol encryption. A failure closes the connection, including previously applied wrappers.
+
+## Stage 6 — TCP header capture/reuse
+
+- Capture static or random nonempty bytes and reuse earlier values on either side of the same handshake. Validate the variable references in actual alternating client/server order before dialing.
+- Variables are per-handshake, never shared across connections; received reuse values must match the captured value. Byte budget includes repeated values, and variable names are limited to 64 characters.
+- Transform expressions and server error sequences are still explicitly rejected. Cross-connection state is intentionally not implemented; Xray evaluator and binary interop remain separate gates.
 
 ## Remaining scope (not implemented)
 

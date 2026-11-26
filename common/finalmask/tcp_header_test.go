@@ -75,7 +75,7 @@ func TestLXFinalMaskTCPHeaderMismatchAndCancel(t *testing.T){
 
 func TestLXFinalMaskTCPHeaderValidation(t *testing.T){
 	for _,s:=range []string{
-		`{"clients":[[{"capture":"v","rand":2}]]}`,
+		`{"clients":[[{"capture":"bad-name","rand":2}]]}`,
 		`{"clients":[[{"reuse":"v"}]]}`,
 		`{"clients":[[{"transform":{"op":"xor"}}]]}`,
 		`{"clients":[[{"rand":1,"packet":[1]}]]}`,
@@ -88,4 +88,57 @@ func TestLXFinalMaskTCPHeaderValidation(t *testing.T){
 		if err:=json.Unmarshal([]byte(s),&o);err!=nil{t.Fatal(err)}
 		if _,err:=NewTCPHeader(&o);err==nil{t.Fatalf("accepted %s",s)}
 	}
+}
+
+func TestLXFinalMaskTCPHeaderCaptureReuse(t *testing.T){
+	h:=headerConfig(t,`{"clients":[[{"rand":3,"capture":"client"}],[{"reuse":"server","capture":"echo"}]],"servers":[[{"reuse":"client"},{"rand":2,"capture":"server"}],[{"reuse":"echo"}]]}`)
+	for i:=0;i<2;i++{
+		client,peer:=net.Pipe()
+		ctx,cancel:=context.WithTimeout(context.Background(),time.Second)
+		done:=make(chan error,1)
+		go func(){
+			defer peer.Close()
+			peer.SetDeadline(time.Now().Add(time.Second))
+			challenge:=make([]byte,3)
+			if _,err:=io.ReadFull(peer,challenge);err!=nil{done<-err;return}
+			response:=[]byte{byte(i),99}
+			if _,err:=peer.Write(append(challenge,response...));err!=nil{done<-err;return}
+			got:=make([]byte,2)
+			if _,err:=io.ReadFull(peer,got);err!=nil{done<-err;return}
+			if string(got)!=string(response){done<-errors.New("server challenge was not echoed");return}
+			_,err:=peer.Write(response)
+			done<-err
+		}()
+		c,err:=h.Handshake(ctx,client)
+		cancel()
+		client.Close()
+		if err!=nil||c==nil{t.Fatalf("exchange %d: %v",i,err)}
+		if err:=<-done;err!=nil{t.Fatal(err)}
+	}
+}
+
+func TestLXFinalMaskTCPHeaderReuseValidation(t *testing.T){
+	for _,s:=range []string{
+		`{"clients":[[{"reuse":"future"}]],"servers":[[{"rand":1,"capture":"future"}]]}`,
+		`{"clients":[[{"capture":"empty"}]]}`,
+		`{"clients":[[{"rand":8193,"capture":"v"},{"reuse":"v"}]]}`,
+		`{"clients":[[{"rand":1,"capture":"v"},{"reuse":"v","packet":[1]}]]}`,
+	}{
+		var o option.LXFinalMaskTCPHeaderOptions
+		if err:=json.Unmarshal([]byte(s),&o);err!=nil{t.Fatal(err)}
+		if _,err:=NewTCPHeader(&o);err==nil{t.Fatalf("accepted %s",s)}
+	}
+}
+
+func TestLXFinalMaskTCPHeaderReuseMismatch(t *testing.T){
+	h:=headerConfig(t,`{"clients":[[{"packet":[1,2],"capture":"v"}]],"servers":[[{"reuse":"v"}]]}`)
+	client,peer:=net.Pipe()
+	defer client.Close();defer peer.Close()
+	ctx,cancel:=context.WithTimeout(context.Background(),time.Second)
+	defer cancel()
+	go func(){
+		peer.SetDeadline(time.Now().Add(time.Second))
+		if _,err:=io.ReadFull(peer,make([]byte,2));err==nil{_,_=peer.Write([]byte{1,3})}
+	}()
+	if c,err:=h.Handshake(ctx,client);c!=nil||err==nil||!strings.Contains(err.Error(),"mismatch"){t.Fatalf("got %v %v",c,err)}
 }

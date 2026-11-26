@@ -13,6 +13,7 @@ import (
 	"math/big"
 	mathrand "math/rand"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,7 @@ type headerItem struct {
 	random int
 	lo,hi int
 	delayLo,delayHi int
+	capture,reuse string
 }
 
 type TCPHeader struct {
@@ -77,6 +79,12 @@ func headerBytes(raw json.RawMessage,typ string)([]byte,error){
 	}
 }
 
+var headerVariableName = regexp.MustCompile("^[A-Za-z_][A-Za-z0-9_]*$")
+
+func validHeaderVariable(s string) bool {
+	return s=="" || (len(s)<=64 && headerVariableName.MatchString(s))
+}
+
 func NewTCPHeader(o *option.LXFinalMaskTCPHeaderOptions)(*TCPHeader,error){
 	if o==nil{return nil,nil}
 	if len(o.Errors)!=0{return nil,errors.New("finalmask_tcp_header: error sequences unsupported")}
@@ -89,7 +97,9 @@ func NewTCPHeader(o *option.LXFinalMaskTCPHeaderOptions)(*TCPHeader,error){
 			for _,item:=range seq{
 				items++
 				if items>headerMaxItems{return nil,errors.New("too many header items")}
-				if item.Capture!=""||item.Reuse!=""||len(item.Transform)!=0{return nil,errors.New("stateful header items unsupported")}
+				if len(item.Transform)!=0{return nil,errors.New("header transforms unsupported")}
+				if !validHeaderVariable(item.Capture)||!validHeaderVariable(item.Reuse){return nil,errors.New("invalid header variable name")}
+				if item.Reuse!=""&&(item.Rand!=0||len(item.Packet)!=0){return nil,errors.New("multiple header item kinds")}
 				if item.Rand<0||item.Rand>headerMaxBytes||(item.Rand>0&&len(item.Packet)!=0){return nil,errors.New("invalid random header item")}
 				packet,err:=headerBytes(item.Packet,item.Type)
 				if err!=nil{return nil,err}
@@ -101,7 +111,8 @@ func NewTCPHeader(o *option.LXFinalMaskTCPHeaderOptions)(*TCPHeader,error){
 				if total>headerMaxBytes{return nil,errors.New("header byte budget exceeded")}
 				if sending{budget+=dhi}
 				if budget>5000{return nil,errors.New("header delay budget exceeded")}
-				round=append(round,headerItem{packet:packet,random:item.Rand,lo:lo,hi:hi,delayLo:dlo,delayHi:dhi})
+				if item.Capture!="" && len(packet)+item.Rand==0 && item.Reuse==""{return nil,errors.New("capture needs a nonempty source")}
+				round=append(round,headerItem{packet:packet,random:item.Rand,lo:lo,hi:hi,delayLo:dlo,delayHi:dhi,capture:item.Capture,reuse:item.Reuse})
 			}
 			out=append(out,round)
 		}
@@ -111,6 +122,29 @@ func NewTCPHeader(o *option.LXFinalMaskTCPHeaderOptions)(*TCPHeader,error){
 	if err!=nil{return nil,fmt.Errorf("finalmask_tcp_header clients: %w",err)}
 	servers,err:=compile(o.Servers,false)
 	if err!=nil{return nil,fmt.Errorf("finalmask_tcp_header servers: %w",err)}
+	// Validate in actual exchange order, not in client-array/server-array
+	// order. All variable sizes are statically known in this subset.
+	sizes:=make(map[string]int)
+	check:=func(seq []headerItem)error{
+		for _,item:=range seq{
+			size:=len(item.packet)+item.random
+			if item.reuse!=""{
+				var ok bool
+				size,ok=sizes[item.reuse]
+				if !ok{return fmt.Errorf("unknown header variable %q",item.reuse)}
+				total+=size
+				if total>headerMaxBytes{return errors.New("header byte budget exceeded by reuse")}
+			}
+			if item.capture!=""{sizes[item.capture]=size}
+		}
+		return nil
+	}
+	j:=0
+	for _,seq:=range clients{
+		if err:=check(seq);err!=nil{return nil,err}
+		if j<len(servers){if err:=check(servers[j]);err!=nil{return nil,err};j++}
+	}
+	for ;j<len(servers);j++{if err:=check(servers[j]);err!=nil{return nil,err}}
 	return &TCPHeader{clients:clients,servers:servers},nil
 }
 
@@ -143,7 +177,7 @@ func headerRandom(item headerItem)([]byte,error){
 	return b,nil
 }
 
-func sendHeader(ctx context.Context,c net.Conn,seq []headerItem)error{
+func sendHeader(ctx context.Context,c net.Conn,seq []headerItem,vars map[string][]byte)error{
 	var merged []byte
 	for _,item:=range seq{
 		if err:=ctx.Err();err!=nil{return err}
@@ -152,23 +186,37 @@ func sendHeader(ctx context.Context,c net.Conn,seq []headerItem)error{
 			merged=nil
 			if err:=headerPause(ctx,item);err!=nil{return err}
 		}
+		var value []byte
 		if item.random>0{
 			b,err:=headerRandom(item)
 			if err!=nil{return err}
-			merged=append(merged,b...)
-		}else{merged=append(merged,item.packet...)}
+			value=b
+		}else if item.reuse!=""{
+			var ok bool
+			value,ok=vars[item.reuse]
+			if !ok{return fmt.Errorf("unknown header variable %q",item.reuse)}
+		}else{value=item.packet}
+		if item.capture!=""{vars[item.capture]=bytes.Clone(value)}
+		merged=append(merged,value...)
 	}
 	return headerWrite(c,merged)
 }
 
-func receiveHeader(c net.Conn,seq []headerItem)error{
+func receiveHeader(c net.Conn,seq []headerItem,vars map[string][]byte)error{
 	for _,item:=range seq{
-		size:=len(item.packet)+item.random
+		expected:=item.packet
+		if item.reuse!=""{
+			var ok bool
+			expected,ok=vars[item.reuse]
+			if !ok{return fmt.Errorf("unknown header variable %q",item.reuse)}
+		}
+		size:=len(expected)+item.random
 		if size==0{continue}
 		buf:=make([]byte,size)
 		if _,err:=io.ReadFull(c,buf);err!=nil{return err}
 		// Like Xray, random receive items are consumed without checking value.
-		if item.random==0&&!bytes.Equal(buf,item.packet){return errors.New("header auth failed: static response mismatch")}
+		if item.random==0&&!bytes.Equal(buf,expected){return errors.New("header auth failed: static or reused response mismatch")}
+		if item.capture!=""{vars[item.capture]=buf}
 	}
 	return nil
 }
@@ -182,15 +230,16 @@ func(h *TCPHeader) Handshake(ctx context.Context,c net.Conn)(net.Conn,error){
 	defer cancel()
 	stop:=context.AfterFunc(ctx,func(){_ = c.Close()})
 	exchange:=func()error{
+		vars:=make(map[string][]byte)
 		j:=0
 		for _,seq:=range h.clients{
-			if err:=sendHeader(ctx,c,seq);err!=nil{return err}
+			if err:=sendHeader(ctx,c,seq,vars);err!=nil{return err}
 			if j<len(h.servers){
-				if err:=receiveHeader(c,h.servers[j]);err!=nil{return err}
+				if err:=receiveHeader(c,h.servers[j],vars);err!=nil{return err}
 				j++
 			}
 		}
-		for ;j<len(h.servers);j++{if err:=receiveHeader(c,h.servers[j]);err!=nil{return err}}
+		for ;j<len(h.servers);j++{if err:=receiveHeader(c,h.servers[j],vars);err!=nil{return err}}
 		return nil
 	}
 	err:=exchange()
