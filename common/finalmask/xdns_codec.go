@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/sagernet/sing-box/option"
 	M "github.com/sagernet/sing/common/metadata"
 	"golang.org/x/net/dns/dnsmessage"
 )
@@ -31,6 +32,7 @@ type xdnsConfig struct{
 	dohWorkers int
 	dohALPN []string
 	dohH3 bool
+	dohH3Settings *xdnsH3Settings
 	domain string
 	types []dnsmessage.Type
 	labelLimit,capacity,edns,extraPoll int
@@ -47,6 +49,8 @@ type xdnsSettings struct{
 		Resolvers []struct{
 			Addrs []string `json:"addrs"`
 			Worker int `json:"worker"`
+			BootstrapIP string `json:"bootstrapIP"`
+			QUIC *option.LXFinalMaskQUICParams `json:"quicConfig"`
 			TLS *struct{
 				ServerName string `json:"serverName"`
 				ALPN []string `json:"alpn"`
@@ -104,11 +108,17 @@ func compileXDNSSingle(s xdnsSettings)(*xdnsConfig,error){
 	u,err:=url.Parse(address)
 	if err!=nil||u.User!=nil||u.Fragment!=""||u.Hostname()==""{return nil,errors.New("invalid XDNS resolver address")}
 	if u.Scheme!="udp"&&u.Scheme!="tcp"&&u.Scheme!="https"{return nil,errors.New("unsupported XDNS resolver scheme")}
-	if u.Scheme!="https"&&(u.Path!=""||u.RawQuery!=""||r.TLS!=nil){return nil,errors.New("invalid plain XDNS resolver options")}
+	if u.Scheme!="https"&&(u.Path!=""||u.RawQuery!=""||r.TLS!=nil||r.QUIC!=nil||r.BootstrapIP!=""){return nil,errors.New("invalid plain XDNS resolver options")}
 	if u.Scheme=="https"&&(u.Path==""||u.RawQuery!=""){return nil,errors.New("XDNS DoH requires explicit HTTPS path without query")}
 	if r.TLS!=nil&&r.TLS.AllowInsecure{return nil,errors.New("XDNS DoH requires TLS verification")}
-	ip,err:=netip.ParseAddr(u.Hostname())
-	if err!=nil||ip.Zone()!=""||ip.IsUnspecified(){return nil,errors.New("XDNS pilot requires a literal resolver IP")}
+	host:=u.Hostname()
+	ip,err:=netip.ParseAddr(host)
+	if err!=nil{
+		if u.Scheme!="https"||r.BootstrapIP==""||!validXDNSResolverHost(host){return nil,errors.New("XDNS hostname requires HTTPS and explicit bootstrapIP")}
+		ip,err=netip.ParseAddr(r.BootstrapIP)
+	}else if r.BootstrapIP!=""{return nil,errors.New("bootstrapIP requires a resolver hostname")}
+	if err!=nil||!validXICMPIP(ip){return nil,errors.New("invalid XDNS resolver IP")}
+	ip=ip.Unmap()
 	port:=u.Port()
 	if port==""{port="53";if u.Scheme=="https"{port="443"}}
 	p,err:=strconv.Atoi(port)
@@ -134,10 +144,11 @@ func compileXDNSSingle(s xdnsSettings)(*xdnsConfig,error){
 	cfg:=&xdnsConfig{resolver:M.ParseSocksaddr(net.JoinHostPort(ip.String(),port)),network:u.Scheme,domain:domain,types:types,labelLimit:d.LabelLimit,capacity:capacity,edns:d.EDNS,extraPoll:s.ExtraPoll}
 	if u.Scheme=="https"{
 		cfg.dohURL=u.String();cfg.dohWorkers=r.Worker
+		cfg.dohServerName=host
 		if cfg.dohWorkers==0{cfg.dohWorkers=4}
 		if cfg.dohWorkers>4{return nil,errors.New("XDNS DoH supports at most four workers")}
 		if r.TLS!=nil{
-			cfg.dohServerName=r.TLS.ServerName;cfg.dohALPN=r.TLS.ALPN
+			if r.TLS.ServerName!=""{cfg.dohServerName=r.TLS.ServerName};cfg.dohALPN=r.TLS.ALPN
 			if len(cfg.dohALPN)>2{return nil,errors.New("invalid XDNS DoH ALPN")}
 			for _,v:=range cfg.dohALPN{
 				if v=="h3"{
@@ -147,7 +158,21 @@ func compileXDNSSingle(s xdnsSettings)(*xdnsConfig,error){
 			}
 		}
 	}
+	if r.QUIC!=nil&&!cfg.dohH3{return nil,errors.New("XDNS quicConfig requires HTTP/3")}
+	if cfg.dohH3{
+		cfg.dohH3Settings,err=compileXDNSH3Params(r.QUIC)
+		if err!=nil{return nil,err}
+	}
 	return cfg,nil
+}
+
+func validXDNSResolverHost(host string)bool{
+	if len(host)==0||len(host)>253||strings.HasSuffix(host,"."){return false}
+	for _,l:=range strings.Split(strings.ToLower(host),"."){
+		if len(l)==0||len(l)>63||l[0]=='-'||l[len(l)-1]=='-'{return false}
+		for _,b:=range []byte(l){if !(b>='a'&&b<='z'||b>='0'&&b<='9'||b=='-'){return false}}
+	}
+	return true
 }
 
 func(c *xdnsConfig)name(data []byte)(dnsmessage.Name,error){

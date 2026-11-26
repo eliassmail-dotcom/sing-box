@@ -87,3 +87,36 @@ func TestLXFinalMaskXDNSDoH3Validation(t *testing.T){
 	raw=strings.Replace(raw,`["h3"]`,`["h3","h2"]`,1)
 	if _,err:=compileXDNS(json.RawMessage(raw));err==nil{t.Fatal("mixed h3 accepted")}
 }
+
+func TestLXFinalMaskXDNSBootstrapHost(t *testing.T){
+	payload:=bytes.Repeat([]byte{3},32)
+	s:=httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+		if !strings.HasPrefix(r.Host,"example.com:")||r.TLS.ServerName!="example.com"{w.WriteHeader(400);return}
+		b,e:=io.ReadAll(r.Body)
+		if e!=nil||!bytes.Equal(b,payload){w.WriteHeader(400);return}
+		w.Header().Set("Content-Type","application/dns-message");w.Write(b)
+	}))
+	defer s.Close()
+	// The httptest certificate covers example.com, and the dial target
+	// is explicitly loopback, so no external DNS is needed.
+	hostURL:=strings.Replace(s.URL,"127.0.0.1","example.com",1)+"/dns-query"
+	raw:=strings.Replace(xdnsTestConfig,"udp://127.0.0.1:5353",hostURL,1)
+	if _,e:=compileXDNS(json.RawMessage(raw));e==nil{t.Fatal("implicit bootstrap accepted")}
+	raw=strings.Replace(raw,`"addrs":[`,`"bootstrapIP":"127.0.0.1","addrs":[`,1)
+	cfg,e:=compileXDNS(json.RawMessage(raw))
+	if e!=nil{t.Fatal(e)}
+	if cfg.dohServerName!="example.com"||cfg.resolver.Addr.String()!="127.0.0.1"||cfg.dohURL!=hostURL{t.Fatal("bootstrap mapping incorrect")}
+	c:=newXDNSDoHConn(context.Background(),N.SystemDialer,cfg);defer c.Close()
+	roots:=x509.NewCertPool();roots.AddCert(s.Certificate())
+	c.tlsConfig.RootCAs=roots
+	got,e:=c.exchange(payload)
+	if e!=nil||!bytes.Equal(got,payload){t.Fatalf("exchange %x %v",got,e)}
+	for _,bad:=range []string{
+		strings.Replace(raw,"example.com","-example.com",1),
+		strings.Replace(raw,`"bootstrapIP":"127.0.0.1"`,`"bootstrapIP":"0.0.0.0"`,1),
+		strings.Replace(raw,"example.com","127.0.0.1",1),
+		strings.Replace(raw,`"addrs":[`,`"quicConfig":{},"addrs":[`,1),
+	}{
+		if _,e=compileXDNS(json.RawMessage(bad));e==nil{t.Fatal("invalid bootstrap/QUIC config accepted")}
+	}
+}
