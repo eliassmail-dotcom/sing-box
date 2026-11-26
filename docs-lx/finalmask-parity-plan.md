@@ -57,6 +57,12 @@ Reference: Xray-core v26.11.9, transport/internet/finalmask/fragment/conn.go and
 - Shared immutable clue-group index; no unbounded password-keyed cache. Per-outbound tables share base clue arrays; 4 KiB plaintext write chunks and read chunks, up to eight configured tables, padding 0-100. One sudoku entry is supported in the ordered plain VLESS TCP chain.
 - Tests cover independent reference vectors/round-trip, rotation, padding, large streams, and config rejection. Real Xray executable interoperability and mobile memory measurements remain release gates. UDP Sudoku and TLS/REALITY integration are not implemented.
 
+## Stage 9 — XMC client port
+
+- Ported original Xray XMC sources with MPL-2.0 notices, using local JSON config and a test-only upstream server peer. Ordered TCP list accepts xmc, limited to one per type and plain VLESS.
+- Uses pinned RSA derivation, login/profile checks, CFB8 and packet/padding state machine. No auto-generated or network-fetched profiles. At most eight profiles, bounded profile fields, password and hostname. Failed client handshake becomes terminal and closes the connection.
+- Upstream tests run in a dedicated CI step, in addition to LX integration tests. Actual external Xray process interoperability and CPU/memory on iOS remain release gates.
+
 ## Remaining scope (not implemented)
 
 1. Verify pinned upstream parser, all fragment options, mask ordering and error semantics. Finish numeric write ranges and raw transport integration; verify full-stack cancellation and resource tests. Document deliberate divergences from Xray (including zero-length TLS records and incomplete initial writes).

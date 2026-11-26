@@ -12,12 +12,14 @@ import (
 
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/common/finalmask/sudoku"
+	"github.com/sagernet/sing-box/common/finalmask/xmc"
 )
 
 type tcpMask struct {
 	fragment *TCPFragment
 	header *TCPHeader
 	sudoku *sudoku.Mask
+	xmc *xmc.Mask
 }
 
 // TCPChain is immutable. Its configured order follows Xray: the first
@@ -91,7 +93,7 @@ func compileFragmentSettings(raw json.RawMessage)(*TCPFragment,error){
 
 func NewTCPChain(opts []option.LXFinalMaskTCPMaskOptions)(*TCPChain,error){
 	if len(opts)==0{return nil,nil}
-	if len(opts)>3{return nil,errors.New("finalmask_tcp: at most three masks in pilot")}
+	if len(opts)>4{return nil,errors.New("finalmask_tcp: at most four masks in pilot")}
 	c:=&TCPChain{}
 	seen:=make(map[string]bool)
 	for i,o:=range opts{
@@ -105,6 +107,9 @@ func NewTCPChain(opts []option.LXFinalMaskTCPMaskOptions)(*TCPChain,error){
 		case "sudoku":
 			var settings sudoku.Config
 			if err=decodeMaskSettings(o.Settings,&settings);err==nil{m.sudoku,err=sudoku.New(&settings)}
+		case "xmc":
+			var settings xmc.Config
+			if err=decodeMaskSettings(o.Settings,&settings);err==nil{m.xmc,err=xmc.New(&settings)}
 		case "header-custom":
 			var settings option.LXFinalMaskTCPHeaderOptions
 			if err=decodeMaskSettings(o.Settings,&settings);err==nil{
@@ -125,6 +130,10 @@ func (c *TCPChain) Wrap(ctx context.Context,conn net.Conn)(net.Conn,error){
 		m:=c.masks[i]
 		if m.fragment!=nil{
 			conn=m.fragment.Wrap(conn)
+		}else if m.xmc!=nil{
+			wrapped,err:=m.xmc.WrapClient(conn)
+			if err!=nil{_ = conn.Close();return nil,err}
+			conn=wrapped
 		}else if m.sudoku!=nil{
 			conn=m.sudoku.WrapClient(conn)
 		}else{

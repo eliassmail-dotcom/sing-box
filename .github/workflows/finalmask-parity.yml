@@ -19,3 +19,6 @@ jobs:
       - name: Targeted FinalMask regression gate
         run: |
           go test -race -count=1 -timeout=8m -ldflags '-checklinkname=0' -tags 'with_utls with_lx_command' -run 'Test(LXFinalMask|LxRealityFinalMask)' ./common/tls/ ./common/finalmask/... ./option/ ./protocol/vless/
+
+      - name: Original Xray XMC regression suite
+        run: go test -race -count=1 -timeout=8m ./common/finalmask/xmc/
