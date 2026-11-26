@@ -1,65 +1,44 @@
 #!/usr/bin/env bash
-# lx:build-parity — reproducible Windows boxdd daemon build (peer review #7,
-# F-04/F-06/F-08).
+# lx:build-parity — reproducible Windows boxdd daemon build (peer review #9).
 #
-# This is the single source of truth for Windows parity builds: it applies the
-# exact core preparation the b39 iOS workflow applies (prepare-b38.sh: upstream
-# v1.14.4-lx.35 merge + FinalMask patch), then builds the boxdd daemon with the
-# standard builder, and emits a build manifest recording the base commit, the
-# upstream SHA and the output checksums. Any environment with git, bash and Go
-# 1.26 can rebuild a comparable binary from the same commit.
+# Builds from an already-prepared iOS core: the core integration (upstream
+# merge, FinalMask, F1-F3) lives in the branch history and was validated by
+# the iOS workflow before merge. No on-the-fly preparation is applied; the old
+# b39 flow (prepare-b38.sh + EXPECTED_UPSTREAM_SHA) is kept in the repository
+# for historical reproduction of b39-era builds only.
 #
-# Usage (from the repository root, clean working tree):
-#   bash .github/build-windows-parity.sh
+# Required environment:
+#   LX_PREPARED_SHA — SHA of the verified prepared iOS core commit; must be an
+#                      ancestor of HEAD (the provenance of the core).
+#   LX_UPSTREAM_SHA — upstream tag commit the core integrated (LX.35→LX.36).
+# Optional:
+#   LX_WIN_TAG=v1.14.4-lx.36-b41-windows   force the version tag (git tag -f).
+#   LX_WORKFLOW_RUN=45688648290             GitHub Actions run that validated the core.
+#   LX_WIN_RACE=1                           run the test set with -race.
 #
-# Optional environment:
-#   LX_WIN_TAG=v1.14.4-lx.35-b39-windows  force the version tag reported by the
-#                                         binary (git tag -f, mirroring what the
-#                                         iOS workflow does with v1.14.4-lx.35-b39).
-#   GOFLAGS/GOPROXY                        forwarded to the Go build as-is.
-#
-# Notes:
-# - The script intentionally leaves the working tree in the prepared
-#   (uncommitted merge + patches) state, same as the iOS CI job does in its
-#   ephemeral checkout. Reset with `git reset --hard` after harvesting outputs.
-# - The local Authenticode-gate patch (owner decision 2026-11-12) is NOT part
-#   of this repository; apply it separately per machine if the daemon service
-#   refuses to start an unsigned binary.
+# The script intentionally leaves the working tree clean (no state is mutated
+# beyond an optional local tag).
 set -euxo pipefail
 
+: "${LX_PREPARED_SHA:?set LX_PREPARED_SHA to the prepared iOS core commit}"
+: "${LX_UPSTREAM_SHA:?set LX_UPSTREAM_SHA to the integrated upstream commit}"
+
 test -z "$(git status --porcelain)" || { echo "working tree not clean" >&2; exit 1; }
+git merge-base --is-ancestor "$LX_PREPARED_SHA" HEAD || { echo "LX_PREPARED_SHA is not an ancestor of HEAD" >&2; exit 1; }
 
 BASE_SHA=$(git rev-parse HEAD)
-BASE_REF=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo detached)
-
-# prepare-b38.sh hardcodes python3; on Windows git-bash only `python` exists.
-if ! command -v python3 >/dev/null 2>&1 && command -v python >/dev/null 2>&1; then
-  PYSHIM=$(mktemp -d)
-  printf '#!/usr/bin/env bash\nexec python "$@"\n' > "$PYSHIM/python3"
-  chmod +x "$PYSHIM/python3"
-  export PATH="$PYSHIM:$PATH"
-fi
-
-git submodule update --init
-
-bash .github/prepare-b38.sh
-UPSTREAM_SHA=$(git rev-parse lx35-upstream^{commit})
-echo "Upstream LX35 commit: $UPSTREAM_SHA"
+BASE_TREE=$(git rev-parse HEAD^{tree})
 
 if [ -n "${LX_WIN_TAG:-}" ]; then
   git tag -f "$LX_WIN_TAG" HEAD
 fi
 
+git submodule update --init
+
 mkdir -p dist
 go run ./cmd/internal/build_boxdd -target windows/amd64 -output dist/sing-box-daemon.exe
 
-# Peer review #8, F-08: record what the prepared tree actually is, and prove
-# the binary was tested. LX_WIN_RACE=1 adds -race (needs a C toolchain, e.g.
-# mingw-w64 on Windows).
-PREPARED_TREE_SHA=$(git diff HEAD | sha256sum | cut -d' ' -f1)
-PREPARE_SCRIPT_SHA=$(sha256sum .github/prepare-b38.sh | cut -d' ' -f1)
-FINALMASK_PATCH_SHA=$(sha256sum .github/patch-b38-finalmask.py | cut -d' ' -f1)
-
+# Test the built tree (the same packages as the iOS b41 regression set).
 RACE_FLAG=""
 TEST_MODE="no -race"
 if [ "${LX_WIN_RACE:-0}" = "1" ]; then
@@ -77,23 +56,26 @@ SIZE=$(stat -c %s dist/sing-box-daemon.exe)
 VERSION=$(dist/sing-box-daemon.exe version | tr '\n' '; ')
 GO_VERSION=$(go version | tr '\n' ' ')
 BUILD_TAGS=$(cat release/DEFAULT_BUILD_TAGS_WINDOWS)
+SUBMODULES=$(git submodule status | tr '\n' '; ')
+WINDOWS_COMMITS=$(git log --oneline "$LX_PREPARED_SHA"..HEAD | tr '\n' '; ')
 
 cat > dist/sing-box-daemon-manifest.json <<EOF
 {
   "component": "sing-box-daemon (Windows boxdd)",
-  "branch": "$BASE_REF",
-  "base_commit": "$BASE_SHA",
-  "upstream_lx35_commit": "$UPSTREAM_SHA",
-  "preparation": ".github/prepare-b38.sh (upstream LX.35 merge -X ours + FinalMask patch .github/patch-b38-finalmask.py)",
-  "prepare_script_sha256": "$PREPARE_SCRIPT_SHA",
-  "finalmask_patch_sha256": "$FINALMASK_PATCH_SHA",
-  "prepared_tree_diff_sha256": "$PREPARED_TREE_SHA",
-  "tests": "PASS ($TEST_MODE); packages: common/dialer common/tls option protocol/vless protocol/group protocol/chain experimental/libbox; log: dist/sing-box-daemon-test-results.txt",
-  "test_results": "$TESTS_SUMMARY",
+  "branch": "windows/build-parity",
+  "head_commit": "$BASE_SHA",
+  "head_tree": "$BASE_TREE",
+  "prepared_ios_core": "$LX_PREPARED_SHA",
+  "ios_workflow_run": "${LX_WORKFLOW_RUN:-n/a}",
+  "upstream_lx36_commit": "$LX_UPSTREAM_SHA",
+  "windows_commits": "$WINDOWS_COMMITS",
+  "submodules": "$SUBMODULES",
   "version": "$VERSION",
   "go": "$GO_VERSION",
   "build_tags_default": "$BUILD_TAGS",
   "build_tags_extra": ["with_xhttp", "with_awg", "with_lx_command", "with_lx_chain", "with_trusttunnel", "with_external_windivert", "with_external_usbip_drivers"],
+  "tests": "PASS ($TEST_MODE); packages: common/dialer common/tls option protocol/vless protocol/group protocol/chain experimental/libbox; log: dist/sing-box-daemon-test-results.txt",
+  "test_results": "$TESTS_SUMMARY",
   "sha256": "$SHA256",
   "size_bytes": $SIZE,
   "authenticode": "unsigned; local gate exception applied per machine if needed (owner decision 2026-11-12)"
