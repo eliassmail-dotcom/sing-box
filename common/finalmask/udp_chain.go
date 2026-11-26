@@ -23,7 +23,7 @@ const (
 )
 
 type UDPChain struct { masks []udpMask }
-type udpMask struct { password []byte; geckoMin,geckoMax int; noise *udpNoiseConfig; header *udpHeaderConfig; sudoku *sudoku.Mask; legacy *udpLegacyConfig; xdns *xdnsConfig; xicmp *xicmpConfig; realm *realmConfig }
+type udpMask struct { password []byte; geckoMin,geckoMax int; noise *udpNoiseConfig; header *udpHeaderConfig; sudoku *sudoku.Mask; legacy *udpLegacyConfig; xdns *xdnsConfig; xicmp *xicmpConfig; realm *realmConfig; hop *udpHopConfig }
 type salamanderSettings struct { Password string `json:"password"`; PacketSize json.RawMessage `json:"packetSize,omitempty"` }
 
 // NewUDPChain validates the supported client subset. Reject unsupported
@@ -46,6 +46,11 @@ func NewUDPChain(opts []option.LXFinalMaskUDPMaskOptions)(*UDPChain,error){
 			if err!=nil || (hi>0 && lo==0) {return nil,errors.New("finalmask_udp: invalid gecko packetSize")}
 			m.password=[]byte(settings.Password)
 			m.geckoMin,m.geckoMax=lo,hi
+		case "udphop":
+			if len(opts)!=1{return nil,errors.New("UDP Hop composition not validated")}
+			cfg,err:=compileUDPHop(o.Settings)
+			if err!=nil{return nil,fmt.Errorf("finalmask_udp[%d]: %w",i,err)}
+			m.hop=cfg
 		case "realm":
 			if len(opts)!=1{return nil,errors.New("Realm composition not validated")}
 			cfg,err:=compileRealm(o.Settings)
@@ -95,6 +100,7 @@ func(c *UDPChain) WrapConnected(raw net.Conn)net.Conn{
 	conn:=raw
 	for i:=len(c.masks)-1;i>=0;i--{
 		m:=c.masks[i]
+		if m.hop!=nil{continue} // already wrapped by DialCarrier
 		if m.realm!=nil{continue} // already wrapped by DialCarrier
 		if m.xicmp!=nil{continue} // already wrapped by DialCarrier
 		if m.xdns!=nil{
@@ -164,16 +170,17 @@ func(c *UDPChain)DialDestination(server M.Socksaddr)M.Socksaddr{
 	return server
 }
 func(c *UDPChain)ReplacesCarrier()bool{
-	return c!=nil&&len(c.masks)==1&&(c.masks[0].xdns!=nil||c.masks[0].xicmp!=nil||c.masks[0].realm!=nil)
+	return c!=nil&&len(c.masks)==1&&(c.masks[0].xdns!=nil||c.masks[0].xicmp!=nil||c.masks[0].realm!=nil||c.masks[0].hop!=nil)
 }
 
 // DialNetwork is the underlying carrier protocol, not the QUIC protocol.
 func(c *UDPChain)DialNetwork()string{
-	if c.ReplacesCarrier(){if c.masks[0].realm!=nil{return "udp"};if c.masks[0].xicmp!=nil{return "icmp"};return c.masks[0].xdns.network}
+	if c.ReplacesCarrier(){if c.masks[0].realm!=nil||c.masks[0].hop!=nil{return "udp"};if c.masks[0].xicmp!=nil{return "icmp"};return c.masks[0].xdns.network}
 	return "udp"
 }
 
 func(c *UDPChain)DialCarrier(ctx context.Context,dialer N.Dialer,server M.Socksaddr)(net.Conn,error){
+	if c.ReplacesCarrier()&&c.masks[0].hop!=nil{return dialUDPHop(ctx,dialer,server,c.masks[0].hop)}
 	if c.ReplacesCarrier()&&c.masks[0].realm!=nil{return dialRealm(ctx,dialer,c.masks[0].realm,nil)}
 	if c.ReplacesCarrier()&&c.masks[0].xicmp!=nil{return dialXICMP(ctx,dialer,server,c.masks[0].xicmp)}
 	if c.ReplacesCarrier()&&len(c.masks[0].xdns.alternates)>0{
