@@ -17,6 +17,7 @@ type VLESSUser struct {
 type VLESSOutboundOptions struct {
 	DialerOptions
 	FinalMaskTCPFragment *LXFinalMaskFragmentOptions `json:"finalmask_tcp_fragment,omitempty"`
+	FinalMaskTCPHeader *LXFinalMaskTCPHeaderOptions `json:"finalmask_tcp_header,omitempty"`
 	ServerOptions
 	UUID string `json:"uuid"`
 	Flow string `json:"flow,omitempty"`

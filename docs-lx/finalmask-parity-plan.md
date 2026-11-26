@@ -24,6 +24,13 @@ Reference: Xray-core v26.11.9, transport/internet/finalmask/fragment/conn.go and
 - Wraps the connected stream in both VLESS dial and packet paths, before VLESS encryption, without wrapping the dialer or altering its IP Race interfaces. No claim of physical packet boundaries (TCP or detours may coalesce writes).
 - No generic dialer integration yet; TCP masks over TLS, other transports, and other protocols need a separately reviewed insertion point and interoperability tests. No production or generator changes.
 
+## Stage 4 — TCP header-custom static/random client pilot
+
+- Supports Xray client/server round ordering, static byte array/string/hex/base64 packets, random bytes, random value ranges, and sending delays. A matching server is required.
+- Opt-in finalmask_tcp_header on plain VLESS. Eager bounded exchange after dialing, before encryption and payload; context cancellation closes failed connections. Existing dialer interfaces are untouched.
+- Intentionally rejects capture/reuse/transform, error sequences, simultaneous fragment+header masks, TLS/REALITY and other transports. These are not silently ignored. Limits: 16 KiB total header, 256 items/rounds and five-second handshake.
+- Tests use a manual reference peer, not an actual Xray binary; upstream interoperability is still a release gate.
+
 ## Remaining scope (not implemented)
 
 1. Verify pinned upstream parser, all fragment options, mask ordering and error semantics. Finish numeric write ranges and raw transport integration; verify full-stack cancellation and resource tests. Document deliberate divergences from Xray (including zero-length TLS records and incomplete initial writes).
