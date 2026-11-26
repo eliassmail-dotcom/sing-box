@@ -144,3 +144,7 @@ Accepts at most three distinct UDP/TCP/DoH addresses (multiple addresses per res
 ## Stage 22 — XDNS DoH HTTP/3
 
 Explicit exclusive tlsConfig.alpn=["h3"] selects HTTP/3 in with_quic builds; other builds reject it during config validation. Uses existing quic-go and outbound dialer, verified TLS, one pooled HTTP/3 transport, same worker/queue/request limits. No 0-RTT requests deliberately enabled, no insecure verification or HTTP downgrade. UDP carrier closes on QUIC failure/end; closing DoH cancels requests and closes HTTP/3 transport. QUIC receive windows bounded for mobile pilot. Local real HTTP/3 resolver tests verify protocol, trust and shutdown. Xray-specific quicConfig overrides and full external Xray interoperability remain pending.
+
+## Stage 23 — XICMP client pilot
+
+Single selected literal IPv4/IPv6 endpoint per session, optional list up to four IPs. Uses explicit direct dialer ICMP socket capability and existing ICMPControl; resolver wrappers only forward that capability, detours fail closed. Unix raw and datagram socket paths, no privilege escalation or automatic raw fallback. Windows/other builds explicitly reject at dial until supported. No network namespace support in this pilot. Client ID, echo type/sequence, peer filtering, own echo rejection and bounded buffers follow Xray framing. No additional worker goroutines. Tests use local reference sockets; raw/datagram OS permissions, real Xray server and iOS Network Extension behavior remain unverified.
