@@ -37,6 +37,7 @@ type udpHeaderConfig struct {
 	client,server []headerItem
 	sendSize,receiveSize int
 	needsMetadata bool
+	standalone bool
 }
 
 func udpHeaderUsesMetadata(e *headerExpr)bool{
@@ -49,7 +50,7 @@ func udpHeaderUsesMetadata(e *headerExpr)bool{
 func compileUDPHeader(raw json.RawMessage)(*udpHeaderConfig,error){
 	var s udpHeaderJSON
 	if err:=decodeMaskSettings(raw,&s);err!=nil{return nil,err}
-	if s.Mode!=""&&s.Mode!="prefix"{return nil,errors.New("only UDP header-custom prefix mode is supported")}
+	if s.Mode!=""&&s.Mode!="prefix"&&s.Mode!="standalone"{return nil,errors.New("invalid UDP header-custom mode")}
 	if len(s.Client)+len(s.Server)==0||len(s.Client)+len(s.Server)>udpHeaderMaxItems{return nil,errors.New("invalid UDP header item count")}
 	convert:=func(in []udpHeaderItemJSON)[]option.LXFinalMaskTCPHeaderItem{
 		out:=make([]option.LXFinalMaskTCPHeaderItem,0,len(in))
@@ -65,7 +66,7 @@ func compileUDPHeader(raw json.RawMessage)(*udpHeaderConfig,error){
 		Servers:[][]option.LXFinalMaskTCPHeaderItem{convert(s.Server)},
 	})
 	if err!=nil{return nil,err}
-	c:=&udpHeaderConfig{client:h.clients[0],server:h.servers[0]}
+	c:=&udpHeaderConfig{client:h.clients[0],server:h.servers[0],standalone:s.Mode=="standalone"}
 	sizes:=make(map[string]int)
 	measure:=func(items []headerItem,receiving bool)(int,error){
 		total:=0
@@ -90,6 +91,7 @@ func compileUDPHeader(raw json.RawMessage)(*udpHeaderConfig,error){
 	c.receiveSize,err=measure(c.server,true)
 	if err!=nil{return nil,err}
 	if c.sendSize+c.receiveSize==0{return nil,errors.New("empty UDP header")}
+	if c.standalone&&(c.sendSize==0||c.receiveSize==0){return nil,errors.New("standalone requires nonempty client and server headers")}
 	return c,nil
 }
 

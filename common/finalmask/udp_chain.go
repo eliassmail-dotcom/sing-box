@@ -45,6 +45,7 @@ func NewUDPChain(opts []option.LXFinalMaskUDPMaskOptions)(*UDPChain,error){
 		case "header-custom":
 			cfg,err:=compileUDPHeader(o.Settings)
 			if err!=nil{return nil,fmt.Errorf("finalmask_udp[%d]: %w",i,err)}
+			if cfg.standalone&&len(opts)!=1{return nil,errors.New("UDP header-custom standalone mask combinations not validated")}
 			m.header=cfg
 		case "noise":
 			cfg,err:=compileUDPNoise(o.Settings)
@@ -64,7 +65,10 @@ func(c *UDPChain) WrapConnected(raw net.Conn)net.Conn{
 	for i:=len(c.masks)-1;i>=0;i--{
 		m:=c.masks[i]
 		if m.noise!=nil{conn=newUDPNoiseConn(conn,m.noise);continue}
-		if m.header!=nil{conn=&udpHeaderConn{Conn:conn,config:m.header};continue}
+		if m.header!=nil{
+			if m.header.standalone{conn=newUDPStandaloneConn(conn,m.header)}else{conn=&udpHeaderConn{Conn:conn,config:m.header}}
+			continue
+		}
 		conn=&salamanderUDPConn{Conn:conn,password:m.password}
 		if m.geckoMax>0{conn=&geckoUDPConn{Conn:conn,minPkt:m.geckoMin,maxPkt:m.geckoMax}}
 	}

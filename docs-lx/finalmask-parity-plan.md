@@ -86,7 +86,13 @@ Reference: Xray-core v26.11.9, transport/internet/finalmask/fragment/conn.go and
 
 - Supports prefix mode with static/random items, capture/reuse and bounded transforms through the existing header compiler. Client header sizing is validated before dialing; server expressions can use previously captured client bytes. Receive metadata expressions are rejected, matching Xray's address-free receive evaluator.
 - Per-connected-peer state has a five-second TTL. Failed matches never commit captures; malformed packets are dropped. Header lengths limited to 512 bytes per direction and 64 items total. No background goroutines.
-- Ordered composition with Noise and Salamander/Gecko; one instance per mask, at most three. Standalone handshake mode remains explicitly unsupported. External Xray process interoperability, full chain tests and mobile measurements remain gates.
+- Ordered composition with Noise and Salamander/Gecko; one instance per mask, at most three. Standalone mode was initially unsupported; see Stage 14. External Xray process interoperability, full chain tests and mobile measurements remain gates.
+
+## Stage 14 — UDP Header Custom standalone client
+
+- Separate request/reply datagrams before payload, with five-second session TTL and repeat handshake after expiry. Reuses existing item validation and expression evaluator. No prefix applied to application payload.
+- Single lazy read pump per connected socket; bounded eight-datagram payload queue drops overflow instead of blocking the handshake. Matching replies consumed internally. Close and write deadline interrupt handshake; recoverable read deadlines apply to the wrapper queue. Failure terminates the connection.
+- Standalone mask must be used alone until composition is validated. Nonempty request/reply required. Tests cover repeated exchange, concurrent read/write, deadline, queue saturation and configuration guards. External Xray interoperability, full IPA and resource measurements remain pending.
 
 ## Remaining scope (not implemented)
 
