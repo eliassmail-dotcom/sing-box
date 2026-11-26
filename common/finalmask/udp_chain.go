@@ -2,6 +2,7 @@ package finalmask
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -16,8 +17,8 @@ const (
 	salamanderSalt = 8
 )
 
-type UDPChain struct { password []byte }
-type salamanderSettings struct { Password string `json:"password"` }
+type UDPChain struct { password []byte; geckoMin,geckoMax int }
+type salamanderSettings struct { Password string `json:"password"`; PacketSize json.RawMessage `json:"packetSize,omitempty"` }
 
 // NewUDPChain validates the supported client subset. Reject unsupported
 // variants rather than silently connecting without a required server mask.
@@ -27,14 +28,18 @@ func NewUDPChain(opts []option.LXFinalMaskUDPMaskOptions)(*UDPChain,error){
 	var settings salamanderSettings
 	if err:=decodeMaskSettings(opts[0].Settings,&settings);err!=nil{return nil,err}
 	if len(settings.Password)<4||len(settings.Password)>1024{return nil,errors.New("finalmask_udp: salamander password length must be 4-1024 bytes")}
-	return &UDPChain{password:[]byte(settings.Password)},nil
+	lo,hi,err:=headerRange(settings.PacketSize,0,0,2048)
+	if err!=nil || (hi>0 && lo==0) {return nil,errors.New("finalmask_udp: invalid gecko packetSize")}
+	return &UDPChain{password:[]byte(settings.Password),geckoMin:lo,geckoMax:hi},nil
 }
 
 // A connected datagram stream: every Write corresponds to one UDP packet.
 // Never exposes the underlying socket as a replaceable reader/writer.
 func(c *UDPChain) WrapConnected(raw net.Conn)net.Conn{
 	if c==nil{return raw}
-	return &salamanderUDPConn{Conn:raw,password:c.password}
+	var conn net.Conn=&salamanderUDPConn{Conn:raw,password:c.password}
+	if c.geckoMax>0 {conn=&geckoUDPConn{Conn:conn,minPkt:c.geckoMin,maxPkt:c.geckoMax}}
+	return conn
 }
 
 type salamanderUDPConn struct {

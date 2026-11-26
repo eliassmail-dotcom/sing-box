@@ -16,7 +16,7 @@ func udpOpts(s string)[]option.LXFinalMaskUDPMaskOptions{return []option.LXFinal
 
 func TestLXFinalMaskUDPSalamanderValidation(t *testing.T){
 	if c,err:=NewUDPChain(nil);c!=nil||err!=nil{t.Fatalf("default changed %v %v",c,err)}
-	for _,s:=range []string{`{}`,`{"password":"abc"}`,`{"password":"secret","packetSize":"512-1200"}`,`{"password":"secret","typo":1}`}{
+	for _,s:=range []string{`{}`,`{"password":"abc"}`,`{"password":"secret","packetSize":"0-1200"}`,`{"password":"secret","packetSize":"512-2049"}`,`{"password":"secret","typo":1}`}{
 		if _,err:=NewUDPChain(udpOpts(s));err==nil{t.Fatalf("accepted %s",s)}
 	}
 	if _,err:=NewUDPChain([]option.LXFinalMaskUDPMaskOptions{{Type:"noise",Settings:json.RawMessage("{}")}});err==nil{t.Fatal("accepted noise")}
