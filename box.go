@@ -3,7 +3,6 @@ package box
 import (
 	"context"
 	"io"
-	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -149,10 +148,14 @@ func New(options Options) (*Box, error) {
 	ctx = pause.WithDefaultManager(ctx)
 	var ipWarmup *urltest.IPWarmupCoordinator
 	var keepWarmup bool
-	if runtime.GOOS == "ios" {
+	if urltest.IPWarmupSupportedOS() {
 		ipWarmup = urltest.NewIPWarmupCoordinator(ctx)
 		ctx = service.ContextWithPtr(ctx, ipWarmup)
-		defer func() { if !keepWarmup { ipWarmup.Stop() } }()
+		defer func() {
+			if !keepWarmup {
+				ipWarmup.Stop()
+			}
+		}()
 	}
 	experimentalOptions := common.PtrValueOrDefault(options.Experimental)
 	debugOptions := common.PtrValueOrDefault(experimentalOptions.Debug)
