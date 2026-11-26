@@ -1,0 +1,21 @@
+name: FinalMask parity tests
+on:
+  push:
+    branches: [feature/finalmask-parity]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  finalmask:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Initialize core dependencies
+        run: git submodule update --init --recursive submodules/wireguard-go submodules/sing-tun submodules/gvisor submodules/utls
+      - name: Targeted FinalMask regression gate
+        run: |
+          go test -race -count=1 -timeout=8m -ldflags '-checklinkname=0' -tags 'with_utls with_lx_command' -run 'Test(LXFinalMask|LxRealityFinalMask)' ./common/tls/ ./option/
