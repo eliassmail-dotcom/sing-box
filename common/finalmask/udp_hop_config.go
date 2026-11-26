@@ -36,8 +36,9 @@ func compileUDPHop(raw json.RawMessage)(*udpHopConfig,error){
 		default:return nil,errors.New("invalid UDP Hop mode")
 		}
 	}
-	lo,hi,err:=headerRange(s.Interval,30,5,3600)
+	lo,hi,err:=headerRange(s.Interval,30,30,3600)
 	if err!=nil{return nil,err}
+	if lo<5||hi<lo{return nil,errors.New("UDP Hop interval must be at least five seconds")}
 	c.min,c.max=lo,hi
 	if len(s.RemoteIPs)>8{return nil,errors.New("too many UDP Hop prefixes")}
 	for _,v:=range s.RemoteIPs{
