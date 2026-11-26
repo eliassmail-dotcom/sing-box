@@ -124,3 +124,7 @@ References:
 - https://github.com/XTLS/Xray-core/blob/v26.11.9/transport/internet/finalmask/fragment/conn.go
 - https://github.com/XTLS/Xray-core/blob/v26.11.9/transport/internet/finalmask/fragment/config.proto
 - https://github.com/XTLS/Xray-core/blob/v26.11.9/LICENSE
+
+## Stage 18 — XDNS record types
+
+A, AAAA, CNAME and TXT are accepted, with a random configured type chosen per datagram, correct client-ID type bits and matching pending query type. Indexed responses tolerate reordering and reject missing or duplicate records; A/AAAA permit only bounded zero padding. The default remains TXT. A and AAAA response capacity is substantially smaller than TXT; A-only cannot carry a normal QUIC Initial response at the supported EDNS limit. Codec tests are not proof that all query-type combinations support a working QUIC session. TCP/DoH and multiple resolvers remain unsupported.

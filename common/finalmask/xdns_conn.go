@@ -14,7 +14,7 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 )
 
-type xdnsPending struct{ id uint16; name string; until time.Time }
+type xdnsPending struct{ id uint16; typ dnsmessage.Type; name string; until time.Time }
 type xdnsConn struct{
 	net.Conn
 	cfg *xdnsConfig
@@ -62,7 +62,7 @@ func(c *xdnsConn)send(p []byte)error{
 		wire,name,err:=c.cfg.query(id,frame);if err!=nil{return err}
 		c.mu.Lock()
 		slot:=c.next%len(c.pending);c.next++
-		c.pending[slot]=xdnsPending{id:id,name:name,until:time.Now().Add(10*time.Second)}
+		c.pending[slot]=xdnsPending{id:id,typ:xdnsQueryType(frame[0]&3),name:name,until:time.Now().Add(10*time.Second)}
 		c.mu.Unlock()
 		n,err:=c.Conn.Write(wire)
 		if err==nil&&n!=len(wire){err=io.ErrShortWrite}
@@ -92,10 +92,10 @@ func(c *xdnsConn)reader(){
 		c.mu.Lock()
 		found:=-1
 		now:=time.Now()
-		for i,p:=range c.pending{if p.id==msg.Header.ID&&p.name!=""&&strings.EqualFold(p.name,name)&&now.Before(p.until){found=i;break}}
+		for i,p:=range c.pending{if p.id==msg.Header.ID&&p.typ==msg.Questions[0].Type&&p.name!=""&&strings.EqualFold(p.name,name)&&now.Before(p.until){found=i;break}}
 		if found<0{c.mu.Unlock();continue}
 		expected:=c.pending[found].name
-		packets,e:=decodeXDNSResponse(&msg,expected)
+		packets,e:=c.cfg.decodeResponse(&msg,expected,c.pending[found].typ)
 		if e==nil{c.pending[found]=xdnsPending{}}
 		c.mu.Unlock()
 		if e!=nil{continue}
