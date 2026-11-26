@@ -220,7 +220,7 @@ func sendHeader(ctx context.Context,c net.Conn,seq []headerItem,vars map[string]
 	return headerWrite(c,merged)
 }
 
-func receiveHeader(c net.Conn,seq []headerItem,vars map[string][]byte)error{
+func receiveHeader(c net.Conn,seq []headerItem,vars map[string][]byte,metadata map[string]uint64)error{
 	for _,item:=range seq{
 		expected:=item.packet
 		if item.reuse!=""{
