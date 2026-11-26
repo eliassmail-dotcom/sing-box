@@ -15,7 +15,14 @@ Reference: Xray-core v26.11.9, transport/internet/finalmask/fragment/conn.go and
 - lengths and delays arrays override their scalar values, with repeat-last semantics; only one zero delay range uses the merged-write path.
 - Explicit LX resource safeguards: up to 256 length/delay ranges, nonzero lengths only, at most 5000 ms worst-case total delay per ClientHello, rejected before writing. These limits are intentionally stricter than Xray.
 - Delay waits are interrupted by wrapper Close and write deadline updates; tests exercise both. Inherited deadlines set directly on an underlying connection before wrapping are not observable by the wrapper. Actual TLS cancellation still requires real-stack tests.
-- The raw TCP write-index modes, numeric JSON range inputs, upstream mask ordering and other masks remain unsupported. No generator changes yet.
+- The raw TCP write-index modes are now covered by the separate Stage 3 pilot. Numeric JSON ranges, upstream mask ordering and other masks remain unsupported. No generator changes yet.
+
+## Stage 3 — raw TCP transport pilot
+
+- New common/finalmask TCPFragment connection wrapper, configured on a plain VLESS outbound using finalmask_tcp_fragment. Empty packets selects all nonempty writes; N or N-M selects one-based write indices. TLS and other transports/flow are explicitly rejected for this field.
+- Reuses length/delay sequences and max_split. Uses serialized writes, short-write reporting, close/deadline-aware waits, and rejects before emitting bytes if conservative segment or delay budgets would be exceeded (16384 writes or 5 seconds per input Write). No per-segment buffering.
+- Wraps the connected stream in both VLESS dial and packet paths, before VLESS encryption, without wrapping the dialer or altering its IP Race interfaces. No claim of physical packet boundaries (TCP or detours may coalesce writes).
+- No generic dialer integration yet; TCP masks over TLS, other transports, and other protocols need a separately reviewed insertion point and interoperability tests. No production or generator changes.
 
 ## Remaining scope (not implemented)
 

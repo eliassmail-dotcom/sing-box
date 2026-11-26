@@ -30,6 +30,14 @@ func (o *LXFinalMaskFragmentOptions) LengthRanges() ([]LXFinalMaskLengthRange, e
 	if o.Packets != "tlshello" {
 		return nil, fmt.Errorf("finalmask_fragment supports packets=tlshello only")
 	}
+	return o.TCPFragmentLengthRanges()
+}
+
+// TCPFragmentLengthRanges parses payload lengths shared by TLS and raw TCP masks.
+func (o *LXFinalMaskFragmentOptions) TCPFragmentLengthRanges() ([]LXFinalMaskLengthRange, error) {
+	if o == nil {
+		return nil, nil
+	}
 	values := o.Lengths
 	if len(values) == 0 {
 		values = []string{o.Length}
@@ -140,4 +148,28 @@ func (o *LXFinalMaskFragmentOptions) Validate() error {
 	}
 	_, _, err := o.MaxSplitBounds()
 	return err
+}
+
+// TCPPacketRange parses Xray's raw write-index selection. Empty means every
+// nonempty Write; indices are one-based. tlshello is a separate TLS mode.
+func (o *LXFinalMaskFragmentOptions) TCPPacketRange() (uint64, uint64, error) {
+	if o == nil || o.Packets == "" {
+		return 0, 0, nil
+	}
+	parts := strings.Split(o.Packets, "-")
+	if len(parts) > 2 {
+		return 0, 0, fmt.Errorf("invalid finalmask TCP packet range")
+	}
+	lo, err := strconv.ParseUint(parts[0], 10, 31)
+	if err != nil || lo == 0 {
+		return 0, 0, fmt.Errorf("invalid finalmask TCP packet range")
+	}
+	hi := lo
+	if len(parts) == 2 {
+		hi, err = strconv.ParseUint(parts[1], 10, 31)
+	}
+	if err != nil || hi < lo {
+		return 0, 0, fmt.Errorf("invalid finalmask TCP packet range")
+	}
+	return lo, hi, nil
 }
