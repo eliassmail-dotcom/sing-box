@@ -180,3 +180,5 @@ Up to four names across up to four domain groups, each with independent type set
 ## Stage 32 — expanded acceptance gates
 
 Run the existing targeted suites plus four full-package race-detector suites under the Apple low-memory tag set, and native CLI cross-compilation for Linux amd64, Windows amd64, and Darwin arm64. Repeat carrier lifecycle tests five times. Added a separate experimental b44 IPA workflow based on the verified b41 packaging/signing gates, with Apple client pinned to the same b41 commit, no release publication and no production deployment. IPA workflow is triggered only by its dedicated build branch or manual dispatch; it is not started by this stage's push. Device Network Extension memory and real Xray server interoperability remain explicit acceptance requirements.
+
+Acceptance run 45891148187 exposed checkptr failure in unchanged sing-vmess Vision dependency (TestVisionAcceptsCommonConn_LX) under -race. Preserve b41's existing explicit non-race VLESS encryption suite, with all other selected transport packages still tested under -race. No runtime source or dependency change.

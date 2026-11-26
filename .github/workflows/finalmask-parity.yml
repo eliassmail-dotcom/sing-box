@@ -68,13 +68,19 @@ jobs:
               packages=(./option/ ./route/... ./dns/... ./protocol/chain/ ./protocol/dns/ ./protocol/http/ ./experimental/libbox/)
               ;;
             transports)
-              packages=(./protocol/vless/... ./transport/v2rayquic/ ./transport/v2rayxhttp/ ./protocol/hysteria2/ ./protocol/tuic/)
+              packages=(./protocol/vless/ ./transport/v2rayquic/ ./transport/v2rayxhttp/ ./protocol/hysteria2/ ./protocol/tuic/)
               ;;
             masks)
               packages=(./common/finalmask/...)
               ;;
           esac
           go test -race -count=1 -timeout=15m -ldflags '-checklinkname=0' -tags "$LX_TEST_TAGS" "${packages[@]}"
+      # As in the original b41 acceptance workflow, Vision's dependency
+      # uses unsafe pointer arithmetic incompatible with checkptr under -race.
+      # Keep the full package suite, but run this package without -race.
+      - name: VLESS encryption and Vision regression
+        if: matrix.suite == 'transports'
+        run: go test -count=1 -timeout=8m -ldflags '-checklinkname=0' -tags "$LX_TEST_TAGS" ./protocol/vless/encryption/
       - name: Repeat FinalMask lifecycle tests
         if: matrix.suite == 'masks'
         run: go test -race -count=5 -timeout=10m -ldflags '-checklinkname=0' -tags "$LX_TEST_TAGS" -run 'TestLXFinalMask(XDNS|UDPHop|Realm|XICMP|UDPStandalone)' ./common/finalmask/
