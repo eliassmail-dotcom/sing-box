@@ -107,15 +107,37 @@ jobs:
           test "$(git -C submodules/wireguard-go rev-parse HEAD)" = e587a0f47cfe9b103f134437ebe9a6751677265b
           test "$(git -C submodules/utls rev-parse HEAD)" = 5b1d579d14864b13e142c3567ddfd4fcd320bf57
           test "$(git -C submodules/gvisor rev-parse HEAD)" = 117243aa02fa2915cb53d1d4549bfca3a3ebf238
+      - name: Derive complete production Apple tags
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          text = Path("cmd/internal/build_libbox/main.go").read_text()
+          shared = []
+          for match in re.finditer(r'^\s*(?:sharedTags|darwinTags) = append\((?:sharedTags|darwinTags), ([^\n]+)\)', text, re.M):
+              shared += re.findall(r'"([^"]+)"', match.group(1))
+          apple = text.split("func buildApple() {", 1)[1].split("func ", 1)[0]
+          assert 'tags := append(sharedTags, darwinTags...)' in apple
+          assert 'tags = append(tags, "with_clash_api")' in apple
+          assert '"-tags-not-macos=with_low_memory"' in apple
+          tags = list(dict.fromkeys(shared + ["with_clash_api", "with_low_memory"]))
+          required = {"with_gvisor","with_quic","with_wireguard","with_utls","with_lx_chain","with_lx_idle_suspend","with_xhttp","with_clash_api","with_low_memory","with_openconnect","with_naive_outbound","with_tailscale","with_lx_impair"}
+          assert required.issubset(tags), tags
+          line = "APPLE_TAGS=" + " ".join(tags)
+          print(line)
+          with open(os.environ["GITHUB_ENV"], "a") as out:
+              out.write(line + "\n")
+          PY
       - name: Compile Linux full-feature source (not an iOS build)
         shell: bash
         run: |
           set -euo pipefail
-          go build -ldflags '-checklinkname=0' -tags 'with_utls with_lx_chain with_lx_idle_suspend with_xhttp with_clash_api with_low_memory with_openconnect with_naive_outbound with_tailscale with_lx_command' ./...
+          go build -ldflags '-checklinkname=0' -tags "$APPLE_TAGS" ./...
       - name: Vet and race targeted integration
         shell: bash
         run: |
           set -euo pipefail
-          tags='with_utls with_lx_chain with_lx_idle_suspend with_xhttp with_clash_api with_low_memory with_openconnect with_naive_outbound with_tailscale with_lx_command'
+          tags="$APPLE_TAGS"
           go vet -tags "$tags" ./common/dialer/... ./common/tls/... ./protocol/group/... ./protocol/chain/... ./protocol/vless/... ./route/... ./experimental/libbox/
           go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' -tags "$tags" ./common/dialer/ ./common/tls/... ./protocol/group/... ./protocol/chain/... ./protocol/vless/ ./option/ ./route/ ./experimental/libbox/
