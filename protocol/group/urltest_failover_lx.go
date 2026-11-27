@@ -48,6 +48,9 @@ func (g *URLTestGroup) failoverHeld() []adapter.Outbound {
 // probe the held nodes only; if none is held yet or any of them failed, run the
 // full probe over the remaining nodes and let the failed network move on.
 func (g *URLTestGroup) failoverCheck(ctx context.Context) map[string]uint16 {
+	if len(g.priorityOutbounds) > 0 {
+		return g.priorityFailoverCheck(ctx)
+	}
 	held := g.failoverHeld()
 	result := make(map[string]uint16)
 	failed := make(map[string]bool, len(held))
@@ -168,6 +171,9 @@ func (g *URLTestGroup) probeNow(ctx context.Context, node adapter.Outbound) map[
 
 // failoverSelect is the failover selection used by performSelectionUpdate.
 func (g *URLTestGroup) failoverSelect(network string, reselect bool) (adapter.Outbound, bool) {
+	if len(g.priorityOutbounds) > 0 {
+		return g.priorityFailoverSelect(network, reselect)
+	}
 	// SPEC 054 emergency mode ranks by penalties first, as in least_test.
 	if g.penaltyEmergency(network) {
 		if best := g.penaltyBest(network, ""); best != nil {
