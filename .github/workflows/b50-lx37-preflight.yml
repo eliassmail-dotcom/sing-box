@@ -33,7 +33,7 @@ jobs:
           OLD=b5db574026d89c70136cb488a755da6398d6cfc8
           NEW=92041d1a1bed6633a153a63d37ccc954f66c2d61
           git merge-base --is-ancestor "$BASE" HEAD
-          git diff --exit-code "$BASE" HEAD -- . ':(exclude).github/workflows/b50-lx37-preflight.yml'
+          git diff --exit-code "$BASE" HEAD -- . ':(exclude).github/workflows/b50*' ':(exclude)docs-lx/b50-lx37-review.md' ':(exclude)migration/b50/**'
           test -z "$(git status --porcelain)"
           git fetch --no-tags https://github.com/Leadaxe/sing-box-lx.git \
             refs/tags/v1.14.4-lx.36:refs/lx/upstream36 \
@@ -47,6 +47,17 @@ jobs:
           git apply --3way --index "$RUNNER_TEMP/lx37.patch"
           result=$?
           set -e
+          # Apply only the reviewed-resolution overlays for exact conflict blobs.
+          # The overlays remain separate until every conflict is resolved.
+          for p in box.go common/dialer/resolve.go common/tls/client.go; do
+            test "$(git rev-parse ":1:$p")" = "$(git rev-parse "$OLD:$p")"
+            test "$(git rev-parse ":2:$p")" = "$(git rev-parse "$BASE:$p")"
+            test "$(git rev-parse ":3:$p")" = "$(git rev-parse "$NEW:$p")"
+            git show "$GITHUB_SHA:migration/b50/resolved/$p.txt" > "$p"
+            gofmt -w "$p"
+            git add -- "$p"
+            echo "Applied pinned resolution: $p"
+          done
           echo "### Source migration preflight" >> "$GITHUB_STEP_SUMMARY"
           printf 'Baseline: %s\nUpstream: %s → %s\nApply exit: %s\n' "$BASE" "$OLD" "$NEW" "$result" | tee -a "$GITHUB_STEP_SUMMARY"
           git status --short
@@ -54,7 +65,7 @@ jobs:
           git diff --name-only --diff-filter=U | tee -a "$GITHUB_STEP_SUMMARY"
           echo "Conflict context:"
           git diff --cc --no-ext-diff
-          if [ "$result" -ne 0 ] || [ -n "$(git ls-files -u)" ]; then
+          if [ -n "$(git ls-files -u)" ]; then
             echo "::error::Source integration not yet resolved. No candidate built or published."
             exit 1
           fi
