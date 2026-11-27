@@ -20,8 +20,8 @@ jobs:
         run: |
           set -euo pipefail
           git clone --no-checkout --filter=blob:none https://github.com/eliassmail-dotcom/sing-box-for-apple.git "$RUNNER_TEMP/apple"
-          git -C "$RUNNER_TEMP/apple" checkout --detach de1fa8e747dbef2ce8e93add8cee16172730c3e8
-          test "$(git -C "$RUNNER_TEMP/apple" rev-parse HEAD)" = de1fa8e747dbef2ce8e93add8cee16172730c3e8
+          git -C "$RUNNER_TEMP/apple" checkout --detach eae7921330d0e154b20a29db7c6051b9eab2a6bf
+          test "$(git -C "$RUNNER_TEMP/apple" rev-parse HEAD)" = eae7921330d0e154b20a29db7c6051b9eab2a6bf
       - name: Test actual Foundation profile sources and XCTest cases
         shell: bash
         run: |
