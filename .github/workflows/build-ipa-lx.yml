@@ -1,9 +1,10 @@
-name: Build SFI IPA (priority base to whites, unsigned)
+name: Build SFI IPA (ordered provider failover b48, unsigned)
 
 on:
   push:
     branches:
       - feature/priority-white-fallback
+      - feature/lx-ordered-fallback-b48
   workflow_dispatch:
 
 permissions:
@@ -21,13 +22,13 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Init submodules (Apple client from feature/lx-runtime-settings)
+      - name: Init submodules (Apple client with b46 app fixes)
         run: |-
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
-          git -C clients/apple fetch --no-tags origin feature/lx-runtime-settings
-          git -C clients/apple checkout --detach 672097059d7a0743056162645856acc423d09be5
-          test "$(git -C clients/apple rev-parse HEAD)" = "672097059d7a0743056162645856acc423d09be5"
+          git -C clients/apple fetch --no-tags origin fix/b46-signing-startup
+          git -C clients/apple checkout --detach eeba48d5b65cd13513ece5166a4427136394e5e3
+          test "$(git -C clients/apple rev-parse HEAD)" = "eeba48d5b65cd13513ece5166a4427136394e5e3"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
 
@@ -40,15 +41,15 @@ jobs:
       - name: Patch Go for iOS
         run: .github/patch_go_for_ios.sh
 
-      - name: Test LX base-to-whitelist priority fallback
+      - name: Test LX priority and ordered failover behavior
         run: |-
-          go test ./protocol/group -run '^TestPriorityFallback_' -count=1 -timeout=8m
+          go test ./protocol/group -run '^(TestPriorityFallback_|TestFailover_|TestOrderedFailover_)' -count=1 -timeout=8m
 
       - name: Build Libbox.xcframework (ios/arm64 + simulator, with_clash_api via integration patch)
         run: |-
           make lib_install
           export PATH="$PATH:$(go env GOPATH)/bin"
-          git tag v1.14.4-lx.33 -f
+          git tag v1.14.4-lx.48 -f
           go run ./cmd/internal/build_libbox -target apple -platform ios/arm64,iossimulator/arm64
           rm -rf clients/apple/Libbox.xcframework
           cp -R Libbox.xcframework clients/apple/Libbox.xcframework
@@ -105,15 +106,15 @@ jobs:
       - name: Package unsigned IPA (for GBox signing)
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lx-runtime-settings-unsigned.ipa
+          rm -rf Payload SFI-lx-ordered-fallback-b48-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
-          zip -qry SFI-lx-runtime-settings-unsigned.ipa Payload
-          ls -lh SFI-lx-runtime-settings-unsigned.ipa
+          zip -qry SFI-lx-ordered-fallback-b48-unsigned.ipa Payload
+          ls -lh SFI-lx-ordered-fallback-b48-unsigned.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lx-runtime-settings-unsigned-ipa
-          path: clients/apple/build/SFI-lx-runtime-settings-unsigned.ipa
+          name: SFI-lx-ordered-fallback-b48-unsigned-ipa
+          path: clients/apple/build/SFI-lx-ordered-fallback-b48-unsigned.ipa
           compression-level: 1
