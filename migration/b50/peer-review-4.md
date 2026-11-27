@@ -3,7 +3,7 @@
 Candidate source gate commit: 92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536.
 Base peer review #3 packet commit: 4eb4646cab28fd7738346a881e5dfc2b0418de71.
 Compare: https://github.com/eliassmail-dotcom/sing-box/compare/4eb4646cab28fd7738346a881e5dfc2b0418de71...92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536
-Gate: https://github.com/eliassmail-dotcom/sing-box/actions/runs/46003950620 (do not infer PASS until completed).
+Gate: https://github.com/eliassmail-dotcom/sing-box/actions/runs/46003950620 — completed SUCCESS at 2026-11-27 13:12 UTC, exact candidate SHA above.
 Upstream trace timing defect: https://github.com/Leadaxe/sing-box-lx/issues/89; no trace source or tests changed.
 Original XHTTP rerun: https://github.com/eliassmail-dotcom/sing-box/actions/runs/45991844330 — vet/race step PASS, XHTTP 4.077s; old Swift harness failed as expected on the old immutable SHA. Diagnostic candidate: run 46004240386, 20 isolated repetitions + 3 package repetitions PASS; pure upstream tag derivation corrected in 271f704b38ea385ac8ddfdc9ea93c741b8d6e08b, new comparison run 46004383444: both pure LX.37 and candidate completed SUCCESS (20 isolated repetitions plus 3 full package repetitions, all under race). Initial hang not reproduced.
 
@@ -22,3 +22,12 @@ Compare each new full-source overlay under migration/b50/resolved/protocol/group
 ## Verdict requested
 
 GO / CONDITIONAL GO / NO GO. Independently review the RR integration diff, in particular reservations for decisive parts and the cancellation/freeze boundaries. Report findings by severity. Do not merge, tag, or publish an IPA during review. Full green gate + independent GO required before next release stage.
+
+## Final verified gate result (2026-11-27)
+
+- Source reconstruction, pin validation, full-feature Linux build: PASS.
+- Focused race suite: 6/6 PASS; protocol/group 1.828s.
+- Full vet/race integration: PASS; protocol/group 26.387s, XHTTP 4.426s, experimental/libbox 2.948s; all remaining required packages and VLESS encryption PASS.
+- Native Swift-generated profiles: 4/4 accepted; removed idle_timeout and strip profiles rejected with expected diagnostics. Trap-only Linux Libbox UI bridge never invoked.
+- XHTTP diagnostic matrix (46004383444): both clean upstream and candidate SUCCESS; no reproduced hang.
+- Independent peer review #4 remains the required external decision; no IPA, release tag or production deployment created.
