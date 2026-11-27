@@ -1,5 +1,5 @@
 name: b50 LX.37 source merge preflight
-run-name: "LX b50 | LX.36 → LX.37 | source preflight (no build)"
+run-name: "LX b50 | LX.36 → LX.37 | source preflight and compile gate"
 
 on:
   push:
@@ -17,13 +17,18 @@ concurrency:
 jobs:
   preflight:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           ref: ${{ github.sha }}
           persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.10
+          cache: false
 
       - name: Verify pinned sources and try exact three-way merge
         shell: bash
@@ -49,14 +54,29 @@ jobs:
           set -e
           # Apply only the reviewed-resolution overlays for exact conflict blobs.
           # The overlays remain separate until every conflict is resolved.
-          for p in box.go common/dialer/resolve.go common/tls/client.go; do
+          for p in box.go common/dialer/resolve.go common/tls/client.go protocol/group/urltest.go protocol/group/urltest_failover_lx.go protocol/group/urltest_penalty_lx.go protocol/group/urltest_selected_lx.go protocol/group/urltest_tick_lx.go; do
             test "$(git rev-parse ":1:$p")" = "$(git rev-parse "$OLD:$p")"
             test "$(git rev-parse ":2:$p")" = "$(git rev-parse "$BASE:$p")"
             test "$(git rev-parse ":3:$p")" = "$(git rev-parse "$NEW:$p")"
             git show "$GITHUB_SHA:migration/b50/resolved/$p.txt" > "$p"
+            cmp "$p" <(git show "$GITHUB_SHA:migration/b50/resolved/$p.txt")
             gofmt -w "$p"
+            cmp "$p" <(git show "$GITHUB_SHA:migration/b50/resolved/$p.txt" | gofmt)
             git add -- "$p"
             echo "Applied pinned resolution: $p"
+          done
+          # These two companion changes adapt the clean upstream hooks and b49 guard.
+          for p in protocol/group/urltest_hooks_lx.go protocol/group/urltest_guard_lx.go; do
+            if [ "$p" = protocol/group/urltest_hooks_lx.go ]; then
+              test "$(git rev-parse ":$p")" = "$(git rev-parse "$NEW:$p")"
+            else
+              test "$(git rev-parse ":$p")" = "$(git rev-parse "$BASE:$p")"
+            fi
+            git show "$GITHUB_SHA:migration/b50/resolved/$p.txt" > "$p"
+            cmp "$p" <(git show "$GITHUB_SHA:migration/b50/resolved/$p.txt")
+            gofmt -w "$p"
+            cmp "$p" <(git show "$GITHUB_SHA:migration/b50/resolved/$p.txt" | gofmt)
+            git add -- "$p"
           done
           echo "### Source migration preflight" >> "$GITHUB_STEP_SUMMARY"
           printf 'Baseline: %s\nUpstream: %s → %s\nApply exit: %s\n' "$BASE" "$OLD" "$NEW" "$result" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -71,4 +91,26 @@ jobs:
           fi
           git diff --cached --check
           git diff --cached --stat
-          echo "Exact source patch applied cleanly; no compile, build, push or release performed." >> "$GITHUB_STEP_SUMMARY"
+          echo "Exact source patch and pinned resolutions applied. No publish or push performed." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Init exact upstream dependency pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          git submodule update --init --recursive submodules/utls submodules/wireguard-go submodules/sing-tun submodules/gvisor
+          test "$(git -C submodules/sing-tun rev-parse HEAD)" = 9204da09505e864d98129e8737da71b06926e0bc
+          test "$(git -C submodules/wireguard-go rev-parse HEAD)" = e587a0f47cfe9b103f134437ebe9a6751677265b
+          test "$(git -C submodules/utls rev-parse HEAD)" = 5b1d579d14864b13e142c3567ddfd4fcd320bf57
+          test "$(git -C submodules/gvisor rev-parse HEAD)" = 117243aa02fa2915cb53d1d4549bfca3a3ebf238
+      - name: Compile Linux full-feature source (not an iOS build)
+        shell: bash
+        run: |
+          set -euo pipefail
+          go build -ldflags '-checklinkname=0' -tags 'with_utls with_lx_chain with_lx_idle_suspend with_xhttp with_clash_api with_low_memory with_openconnect with_naive_outbound with_tailscale with_lx_command' ./...
+      - name: Vet and race targeted integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          tags='with_utls with_lx_chain with_lx_idle_suspend with_xhttp with_clash_api with_low_memory with_openconnect with_naive_outbound with_tailscale with_lx_command'
+          go vet -tags "$tags" ./common/dialer/... ./common/tls/... ./protocol/group/... ./protocol/chain/... ./protocol/vless/... ./route/... ./experimental/libbox/
+          go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' -tags "$tags" ./common/dialer/ ./common/tls/... ./protocol/group/... ./protocol/chain/... ./protocol/vless/ ./option/ ./route/ ./experimental/libbox/
