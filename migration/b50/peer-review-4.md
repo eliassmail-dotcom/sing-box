@@ -1,8 +1,8 @@
 # b50 / LX.37 — Peer Review #4: RR multi-URL endpoint reservations
 
-Candidate source gate commit: 92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536.
+Candidate source gate commit (verified against Actions API): 92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536.
 Base peer review #3 packet commit: 4eb4646cab28fd7738346a881e5dfc2b0418de71.
-Compare: https://github.com/eliassmail-dotcom/sing-box/compare/4eb4646cab28fd7738346a881e5dfc2b0418de71...92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536
+Compare: https://github.com/eliassmail-dotcom/sing-box/compare/4eb4646...92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536
 Gate: https://github.com/eliassmail-dotcom/sing-box/actions/runs/46003950620 — completed SUCCESS at 2026-11-27 13:12 UTC, exact candidate SHA above.
 Upstream trace timing defect: https://github.com/Leadaxe/sing-box-lx/issues/89; no trace source or tests changed.
 Original XHTTP rerun: https://github.com/eliassmail-dotcom/sing-box/actions/runs/45991844330 — vet/race step PASS, XHTTP 4.077s; old Swift harness failed as expected on the old immutable SHA. Diagnostic candidate: run 46004240386, 20 isolated repetitions + 3 package repetitions PASS; pure upstream tag derivation corrected in 271f704b38ea385ac8ddfdc9ea93c741b8d6e08b, new comparison run 46004383444: both pure LX.37 and candidate completed SUCCESS (20 isolated repetitions plus 3 full package repetitions, all under race). Initial hang not reproduced.
@@ -30,4 +30,10 @@ GO / CONDITIONAL GO / NO GO. Independently review the RR integration diff, in pa
 - Full vet/race integration: PASS; protocol/group 26.387s, XHTTP 4.426s, experimental/libbox 2.948s; all remaining required packages and VLESS encryption PASS.
 - Native Swift-generated profiles: 4/4 accepted; removed idle_timeout and strip profiles rejected with expected diagnostics. Trap-only Linux Libbox UI bridge never invoked.
 - XHTTP diagnostic matrix (46004383444): both clean upstream and candidate SUCCESS; no reproduced hang.
-- Independent peer review #4 remains the required external decision; no IPA, release tag or production deployment created.
+- Independent GLM peer review #4: GO (2026-11-27); iOS build authorized.
+
+## Independent reviewer disposition (GLM #4)
+
+GO. Reservation ownership, physical cap, ordered endpoint identity, one logical verdict, withdrawal, freeze and native profile gate accepted. Local Windows focused tests 6/6 PASS. Reviewer reproduced `TestRRAlgo_10_secondSoftSignShifts` on pure LX.37 on Windows; not a b50 regression. Linux full group suite passed. Report separately within upstream issue #89 discussion, without modifying the tests. The legacy queue.probe helper remains for fixtures; optional future defensive bound deferred because URLs are validated to <=3 and the reviewed source must remain byte-for-byte unchanged. The full SHA is verified against Actions run 46003950620; the compare link uses the verified head and unique base prefix.
+
+Final iOS build workflow: .github/workflows/b50-ios-ipa.yml, initial workflow commit 30f1aa2555746b39e9389c8734084ac87ff8f649. Checkout is pinned to the reviewed gate SHA and Apple eae7921330d0e154b20a29db7c6051b9eab2a6bf; no post-review production code change.
