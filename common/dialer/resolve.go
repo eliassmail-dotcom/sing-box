@@ -18,18 +18,14 @@ import (
 )
 
 var (
-	_ ResolveDialer                  = (*resolveDialer)(nil)
-	_ ParallelInterfaceResolveDialer = (*resolveParallelNetworkDialer)(nil)
+	_ ResolveDialer               = (*resolveDialer)(nil)
+	_ ResolveDialer               = (*resolveParallelNetworkDialer)(nil)
+	_ ParallelNetworkDialer       = (*resolveParallelNetworkDialer)(nil)
+	_ PacketDialerWithDestination = (*resolveParallelNetworkDialer)(nil)
 )
 
 type ResolveDialer interface {
 	N.Dialer
-	QueryOptions() adapter.DNSQueryOptions
-}
-
-type ParallelInterfaceResolveDialer interface {
-	ParallelInterfaceDialer
-	PacketDialerWithDestination
 	QueryOptions() adapter.DNSQueryOptions
 }
 
@@ -43,12 +39,12 @@ type resolveDialer struct {
 	initErr       error
 	queryOptions  adapter.DNSQueryOptions
 	fallbackDelay time.Duration
-	ipRace        *lxIPRace
-	adaptiveVerifiedTCP bool // enabled during VLESS native REALITY construction only
+	ipRace *lxIPRace
+	adaptiveVerifiedTCP bool // native direct VLESS REALITY only
 }
 
 func NewResolveDialer(ctx context.Context, dialer N.Dialer, parallel bool, server string, queryOptions adapter.DNSQueryOptions, fallbackDelay time.Duration) ResolveDialer {
-	if parallelDialer, isParallel := dialer.(ParallelInterfaceDialer); isParallel {
+	if parallelDialer, isParallel := dialer.(ParallelNetworkDialer); isParallel {
 		return &resolveParallelNetworkDialer{
 			resolveDialer{
 				transport:     service.FromContext[adapter.DNSTransportManager](ctx),
@@ -75,7 +71,7 @@ func NewResolveDialer(ctx context.Context, dialer N.Dialer, parallel bool, serve
 
 type resolveParallelNetworkDialer struct {
 	resolveDialer
-	dialer ParallelInterfaceDialer
+	dialer ParallelNetworkDialer
 }
 
 func (d *resolveDialer) initialize() error {
@@ -120,8 +116,9 @@ func (d *resolveDialer) DialContext(ctx context.Context, network string, destina
 	}
 	if d.parallel {
 		return N.DialParallel(ctx, d.dialer, network, destination, addresses, addresses[0].Is6(), d.fallbackDelay)
+	} else {
+		return N.DialSerial(ctx, d.dialer, network, destination, addresses)
 	}
-	return N.DialSerial(ctx, d.dialer, network, destination, addresses)
 }
 
 func (d *resolveDialer) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
@@ -169,68 +166,75 @@ func (d *resolveDialer) Upstream() any {
 	return d.dialer
 }
 
-func (d *resolveParallelNetworkDialer) DialParallelInterface(ctx context.Context, network string, destination M.Socksaddr, strategy *C.NetworkStrategy, interfaceType []C.InterfaceType, fallbackInterfaceType []C.InterfaceType, fallbackDelay time.Duration) (net.Conn, error) {
+func (d *resolveParallelNetworkDialer) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+	if destination.IsDomain() {
+		return d.DialParallelNetwork(ctx, network, destination, nil, nil, nil, nil, 0)
+	}
 	err := d.initialize()
 	if err != nil {
 		return nil, err
 	}
-	if !destination.IsDomain() {
-		return d.dialer.DialContext(ctx, network, destination)
-	}
-	generation := d.ipRace.currentGeneration()
-	ctx = log.ContextWithOverrideLevel(ctx, log.LevelDebug)
-	addresses, err := d.lookupLx(ctx, destination.Fqdn) // lx: SPEC 139 — d.router.Lookup inside a `lookup` stage
+	return d.dialer.DialContext(ctx, network, destination)
+}
+
+func (d *resolveParallelNetworkDialer) DialParallelNetwork(ctx context.Context, network string, destination M.Socksaddr, destinationAddresses []netip.Addr, strategy *C.NetworkStrategy, interfaceType []C.InterfaceType, fallbackInterfaceType []C.InterfaceType, fallbackDelay time.Duration) (net.Conn, error) {
+	err := d.initialize()
 	if err != nil {
 		return nil, err
 	}
-	if len(addresses) == 0 {
-		return nil, E.New("DNS returned no IP addresses for ", destination.Fqdn)
+	// A caller-provided list has no DNS-generation provenance. Keep the
+	// upstream path for it rather than populating the authenticated race cache.
+	resolvedHere := len(destinationAddresses) == 0 && destination.IsDomain()
+	generation := d.ipRace.currentGeneration()
+	if resolvedHere {
+		ctx = log.ContextWithOverrideLevel(ctx, log.LevelDebug)
+		destinationAddresses, err = d.lookupLx(ctx, destination.Fqdn) // lx: SPEC 139 — d.router.Lookup inside a `lookup` stage
+		if err != nil {
+			return nil, err
+		}
+		if len(destinationAddresses) == 0 {
+			return nil, E.New("DNS returned no IP addresses for ", destination.Fqdn)
+		}
 	}
 	if fallbackDelay == 0 {
 		fallbackDelay = d.fallbackDelay
 	}
-	if d.ipRace != nil && N.NetworkName(network) == N.NetworkTCP && len(addresses) > 1 {
-		return d.ipRace.dialAtGeneration(ctx, destination, addresses, addresses[0].Is6(), generation, false,
+	if resolvedHere && d.ipRace != nil && N.NetworkName(network) == N.NetworkTCP && len(destinationAddresses) > 1 {
+		return d.ipRace.dialAtGeneration(ctx, destination, destinationAddresses, destinationAddresses[0].Is6(), generation, false,
 			func(raceCtx context.Context, address netip.Addr) (net.Conn, error) {
-				return DialSerialNetwork(raceCtx, d.dialer, network, destination,
-					[]netip.Addr{address}, strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
+				return d.dialer.DialParallelNetwork(raceCtx, network, destination, []netip.Addr{address}, strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
 			})
 	}
-	if d.parallel {
-		return DialParallelNetwork(ctx, d.dialer, network, destination, addresses, addresses[0].Is6(), strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
+	if d.parallel || len(destinationAddresses) <= 1 {
+		return d.dialer.DialParallelNetwork(ctx, network, destination, destinationAddresses, strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
 	}
-	return DialSerialNetwork(ctx, d.dialer, network, destination, addresses, strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
+	var errors []error
+	for _, address := range destinationAddresses {
+		conn, err := d.dialer.DialParallelNetwork(ctx, network, destination, []netip.Addr{address}, strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
+		if err == nil {
+			return conn, nil
+		}
+		errors = append(errors, err)
+	}
+	return nil, E.Errors(errors...)
 }
 
-func (d *resolveParallelNetworkDialer) ListenSerialInterfacePacket(ctx context.Context, destination M.Socksaddr, strategy *C.NetworkStrategy, interfaceType []C.InterfaceType, fallbackInterfaceType []C.InterfaceType, fallbackDelay time.Duration) (net.PacketConn, error) {
+func (d *resolveParallelNetworkDialer) ListenSerialNetworkPacket(ctx context.Context, destination M.Socksaddr, destinationAddresses []netip.Addr, strategy *C.NetworkStrategy, interfaceType []C.InterfaceType, fallbackInterfaceType []C.InterfaceType, fallbackDelay time.Duration) (net.PacketConn, netip.Addr, error) {
 	err := d.initialize()
 	if err != nil {
-		return nil, err
+		return nil, netip.Addr{}, err
 	}
-	if !destination.IsDomain() {
-		return d.dialer.ListenPacket(ctx, destination)
-	}
-	ctx = log.ContextWithOverrideLevel(ctx, log.LevelDebug)
-	addresses, err := d.lookupLx(ctx, destination.Fqdn) // lx: SPEC 139 — d.router.Lookup inside a `lookup` stage
-	if err != nil {
-		return nil, err
+	if len(destinationAddresses) == 0 && destination.IsDomain() {
+		ctx = log.ContextWithOverrideLevel(ctx, log.LevelDebug)
+		destinationAddresses, err = d.lookupLx(ctx, destination.Fqdn) // lx: SPEC 139 — d.router.Lookup inside a `lookup` stage
+		if err != nil {
+			return nil, netip.Addr{}, err
+		}
 	}
 	if fallbackDelay == 0 {
 		fallbackDelay = d.fallbackDelay
 	}
-	conn, destinationAddress, err := ListenSerialNetworkPacket(ctx, d.dialer, destination, addresses, strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
-	if err != nil {
-		return nil, err
-	}
-	return bufio.NewNATPacketConn(bufio.NewPacketConn(conn), M.SocksaddrFrom(destinationAddress, destination.Port), destination), nil
-}
-
-func (d *resolveParallelNetworkDialer) QueryOptions() adapter.DNSQueryOptions {
-	return d.queryOptions
-}
-
-func (d *resolveParallelNetworkDialer) Upstream() any {
-	return d.dialer
+	return d.dialer.ListenSerialNetworkPacket(ctx, destination, destinationAddresses, strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
 }
 
 // Only forward the explicit ICMP socket capability. Never unwrap a

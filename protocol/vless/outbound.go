@@ -96,10 +96,6 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		if err != nil {
 			return nil, err
 		}
-		// lx:begin tls-disabled-dialer
-		// NewClientWithOptions returns (nil, nil) for `"tls": {"enabled": false}`;
-		// an unconditional NewDialer here wraps that nil config and SIGSEGVs on the
-		// first handshake (SPEC 045). Same guard as vmess.
 		if outbound.tlsConfig != nil {
 			// lx: iOS adaptive verified race, native direct VLESS+REALITY only.
 			if options.Transport == nil && options.TLS.Reality != nil && options.TLS.Reality.Enabled && options.Detour == "" && options.TCPConcurrent && options.ServerIsDomain() {
@@ -113,7 +109,6 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 				outbound.tlsDialer = tls.NewAdaptiveRealityDialerLx(outboundDialer, outbound.tlsConfig, *options.TLS)
 			}
 		}
-		// lx:end tls-disabled-dialer
 	}
 	if options.Transport != nil {
 		outbound.transport, err = v2ray.NewClientTransport(ctx, outbound.dialer, outbound.serverAddr, common.PtrValueOrDefault(options.Transport), outbound.tlsConfig)

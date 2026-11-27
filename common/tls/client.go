@@ -39,7 +39,7 @@ func parseTLSSpoofOptions(serverName string, options option.OutboundTLSOptions) 
 }
 
 func applyTLSSpoof(conn net.Conn, spoof string, method tlsspoof.Method) (net.Conn, error) {
-	if spoof == "" {
+	if spoof == "" || skipSpoofLx(conn, spoof) { // lx: SPEC 165 Я1 — no spoof without a kernel socket under detour
 		return conn, nil
 	}
 	return tlsspoof.NewConn(conn, method, spoof)
@@ -129,12 +129,13 @@ func applyDetourFragmentDefault(options *ClientOptions) {
 	options.Options.RecordFragment = &recordFragment
 }
 
+
 func NewClientWithOptions(options ClientOptions) (Config, error) {
 	if !options.Options.Enabled {
 		return nil, nil
 	}
-	// lx: SPEC 060 — before any engine sees the options, so REALITY and uTLS
-	// clients get the same default as the standard one.
+	// Preserve b49 explicit FinalMask validation and record-fragment default;
+	// LX.37's runtime detour strip only suppresses socket-level fragmentation.
 	if options.Options.FinalMaskFragment != nil && options.Options.Engine != "" && options.Options.Engine != C.TLSEngineGo {
 		return nil, E.New("finalmask_fragment requires Go TLS engine")
 	}
@@ -150,7 +151,7 @@ func NewClientWithOptions(options ClientOptions) (Config, error) {
 	switch options.Options.Engine {
 	case "", C.TLSEngineGo:
 	case C.TLSEngineApple:
-		return newAppleClient(options.Context, options.Logger, options.ServerAddress, options.Options, options.AllowEmptyServerName)
+		return newAppleClientLx(options) // lx: SPEC 165 — the tls.engine filter hands a handshake without a kernel socket to go
 	case C.TLSEngineWindows:
 		return newWindowsClient(options.Context, options.Logger, options.ServerAddress, options.Options, options.AllowEmptyServerName)
 	default:
@@ -166,7 +167,7 @@ func NewClientWithOptions(options ClientOptions) (Config, error) {
 
 func ClientHandshake(ctx context.Context, conn net.Conn, config Config) (Conn, error) {
 	ctx, stage := beginHandshakeLx(ctx, config) // lx: SPEC 139
-	conn = sniffGuardConnLx(ctx, conn, config)  // LX35
+	conn = sniffGuardConnLx(ctx, conn, config)  // lx: SPEC 060
 	tlsConn, err := aTLS.ClientHandshake(ctx, conn, config)
 	endHandshakeLx(ctx, stage, tlsConn, err) // lx: SPEC 139
 	if err != nil {
@@ -187,8 +188,8 @@ type Dialer interface {
 }
 
 type defaultDialer struct {
-	dialer                 N.Dialer
-	config                 Config
+	dialer N.Dialer
+	config Config
 	adaptiveRecordFragment bool
 }
 
@@ -208,10 +209,28 @@ func (d *defaultDialer) ListenPacket(ctx context.Context, destination M.Socksadd
 }
 
 func (d *defaultDialer) DialTLSContext(ctx context.Context, destination M.Socksaddr) (Conn, error) {
-	return d.dialContext(ctx, destination, true)
+	tlsConn, err := d.dialContext(ctx, destination, d.config)
+	if err == nil {
+		return tlsConn, nil
+	}
+	var echErr *tls.ECHRejectionError
+	if !errors.As(err, &echErr) || len(echErr.RetryConfigList) == 0 {
+		return nil, err
+	}
+	retryConfig := d.config.Clone()
+	echTarget := retryConfig
+	if kTLSConfig, isKTLS := echTarget.(*KTLSClientConfig); isKTLS {
+		echTarget = kTLSConfig.Config
+	}
+	echConfig, isECH := echTarget.(ECHCapableConfig)
+	if !isECH {
+		return nil, err
+	}
+	echConfig.SetECHConfigList(echErr.RetryConfigList)
+	return d.dialContext(ctx, destination, retryConfig)
 }
 
-func (d *defaultDialer) dialContext(ctx context.Context, destination M.Socksaddr, echRetry bool) (Conn, error) {
+func (d *defaultDialer) dialContext(ctx context.Context, destination M.Socksaddr, config Config) (Conn, error) {
 	// LX experimental authenticated IP race. The resolver tries each A/AAAA
 	// record with a fresh TLS config and only caches the address once the
 	// ENTIRE handshake succeeds, including REALITY's proof of authenticity.
@@ -233,7 +252,7 @@ func (d *defaultDialer) dialContext(ctx context.Context, destination M.Socksaddr
 			func(attemptCtx context.Context, raw net.Conn) (net.Conn, error) {
 				// REALITY/uTLS configs contain per-handshake state. Do not
 				// share it between concurrent ClientHello attempts.
-				config := d.config.Clone()
+				config := config.Clone()
 				if d.adaptiveRecordFragment {
 					applyAdaptiveFragmentModeLx(attemptCtx, config)
 				}
@@ -247,15 +266,7 @@ func (d *defaultDialer) dialContext(ctx context.Context, destination M.Socksaddr
 				return tlsConn, nil
 			})
 		if raceErr != nil {
-			// Preserve ECH retry behavior if every candidate failed due to
-			// an ECH rejection, just as the original dialContext does.
-			var echErr *tls.ECHRejectionError
-			if echRetry && errors.As(raceErr, &echErr) && len(echErr.RetryConfigList) > 0 {
-				if echConfig, isECH := d.config.(ECHCapableConfig); isECH {
-					echConfig.SetECHConfigList(echErr.RetryConfigList)
-					return d.dialContext(ctx, destination, false)
-				}
-			}
+			// ECH retry is owned by DialTLSContext and uses a call-local clone.
 			return nil, raceErr
 		}
 		tlsConn, ok := verifiedConn.(Conn)
@@ -273,20 +284,13 @@ func (d *defaultDialer) dialContext(ctx context.Context, destination M.Socksaddr
 	// lx:begin SPEC 139 — upstream calls aTLS.ClientHandshake directly; the stage
 	// helpers wrap it so tls.NewDialer users (VLESS, Trojan, VMess, WS, gRPC, DoT/DoH)
 	// record the `tls` stage too, not only callers of tls.ClientHandshake.
-	handshakeCtx, stage := beginHandshakeLx(ctx, d.config)
-	conn = sniffGuardConnLx(handshakeCtx, conn, d.config) // LX35
-	tlsConn, err := aTLS.ClientHandshake(handshakeCtx, conn, d.config)
+	handshakeCtx, stage := beginHandshakeLx(ctx, config)
+	conn = sniffGuardConnLx(handshakeCtx, conn, config) // lx: SPEC 060
+	tlsConn, err := aTLS.ClientHandshake(handshakeCtx, conn, config)
 	endHandshakeLx(handshakeCtx, stage, tlsConn, err)
 	// lx:end SPEC 139
 	if err != nil {
 		conn.Close()
-		var echErr *tls.ECHRejectionError
-		if echRetry && errors.As(err, &echErr) && len(echErr.RetryConfigList) > 0 {
-			if echConfig, isECH := d.config.(ECHCapableConfig); isECH {
-				echConfig.SetECHConfigList(echErr.RetryConfigList)
-				return d.dialContext(ctx, destination, false)
-			}
-		}
 		return nil, err
 	}
 	return tlsConn, nil

@@ -1,56 +1,73 @@
 package group
 
-import "github.com/sagernet/sing-box/adapter"
+import (
+	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing/common"
+	N "github.com/sagernet/sing/common/network"
+)
 
-// selectedOutboundTCP and selectedOutboundUDP have exactly one lock domain.
-// Keep readers off updateAccess: it can be held during a network probe.
+// All production writes take selectionWriter; reads are the LX.37 atomic
+// values. A stale health check must not overwrite a newer dial fallback.
 func (g *URLTestGroup) selectedLx() (tcp, udp adapter.Outbound) {
-	g.selectedAccess.RLock()
-	defer g.selectedAccess.RUnlock()
-	return g.selectedOutboundTCP, g.selectedOutboundUDP
+	return g.selectedOutboundTCP.Load(), g.selectedOutboundUDP.Load()
+}
+
+func (g *URLTestGroup) selectionSlotLx(network string) *common.TypedValue[adapter.Outbound] {
+	switch network {
+	case N.NetworkTCP:
+		return &g.selectedOutboundTCP
+	case N.NetworkUDP:
+		return &g.selectedOutboundUDP
+	default:
+		return nil
+	}
+}
+
+func (g *URLTestGroup) selectedForNetworkLx(network string) adapter.Outbound {
+	if slot := g.selectionSlotLx(network); slot != nil {
+		return slot.Load()
+	}
+	return nil
+}
+
+func (g *URLTestGroup) setSelectionLx(network string, outbound adapter.Outbound) bool {
+	g.selectionWriter.Lock()
+	defer g.selectionWriter.Unlock()
+	slot := g.selectionSlotLx(network)
+	if slot == nil || slot.Load() == outbound {
+		return false
+	}
+	slot.Store(outbound)
+	g.noteSelectionChange(network)
+	return true
 }
 
 func (g *URLTestGroup) setSelectedTCPLx(outbound adapter.Outbound) {
-	g.selectedAccess.Lock()
-	g.selectedOutboundTCP = outbound
-	g.selectedAccess.Unlock()
+	g.setSelectionLx(N.NetworkTCP, outbound)
 }
 
 func (g *URLTestGroup) setSelectedUDPLx(outbound adapter.Outbound) {
-	g.selectedAccess.Lock()
-	g.selectedOutboundUDP = outbound
-	g.selectedAccess.Unlock()
+	g.setSelectionLx(N.NetworkUDP, outbound)
 }
 
-// updateSelectedLx atomically checks and updates one network's selected
-// outbound. It returns the previous value, whether the update was accepted,
-// and whether the selected node actually changed.
-func (g *URLTestGroup) updateSelectedLx(network string, outbound adapter.Outbound, exists bool) (previous adapter.Outbound, applied bool, changed bool) {
-	g.selectedAccess.Lock()
-	defer g.selectedAccess.Unlock()
-	switch network {
-	case "tcp":
-		previous = g.selectedOutboundTCP
-	case "udp":
-		previous = g.selectedOutboundUDP
-	default:
-		return nil, false, false
+func (g *URLTestGroup) updateSelectedLx(network string, expected, outbound adapter.Outbound, exists bool) (adapter.Outbound, bool) {
+	g.selectionWriter.Lock()
+	defer g.selectionWriter.Unlock()
+	slot := g.selectionSlotLx(network)
+	if slot == nil {
+		return nil, false
 	}
-	if previous == nil || ((exists || !g.guardAllows(RealTag(previous, network))) && outbound != previous) {
-		applied = true
-		changed = previous != outbound
-		if changed {
-			if network == "tcp" {
-				g.selectedOutboundTCP = outbound
-			} else {
-				g.selectedOutboundUDP = outbound
-			}
-		}
+	previous := slot.Load()
+	if previous != expected || previous == outbound {
+		return previous, false
 	}
-	return previous, applied, changed
+	if previous != nil && !exists && g.guardAllows(RealTag(previous, network)) {
+		return previous, false
+	}
+	slot.Store(outbound)
+	g.noteSelectionChange(network)
+	return previous, true
 }
 
-// SelectsPerConnectionLx tells the router to hand a routed connection to this
-// group instead of the node Selected reports: the pick, penalties and the
-// in-connection fallback run in DialContext.
+// Routing must hand a connection to the group, rather than bypassing its pick.
 func (s *URLTest) SelectsPerConnectionLx() {}

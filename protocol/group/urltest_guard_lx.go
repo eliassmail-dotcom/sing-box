@@ -232,7 +232,7 @@ func (g *URLTestGroup) guardAllows(nodeTag string) bool {
 	return g.passiveGuard == nil || !g.passiveGuard.blocked(nodeTag)
 }
 
-func (g *URLTestGroup) guardDial(ctx context.Context, tag string, target string, dial func() (net.Conn, error)) (net.Conn, error) {
+func (g *URLTestGroup) guardDial(ctx context.Context, tag string, target string, siteOnOpen bool, dial func() (net.Conn, error)) (net.Conn, error) {
 	if g.passiveGuard == nil {
 		return dial()
 	}
@@ -244,7 +244,7 @@ func (g *URLTestGroup) guardDial(ctx context.Context, tag string, target string,
 	conn, err := dial()
 	if err == nil {
 		g.passiveGuard.success(tag)
-	} else if isPathDeadDialError(err) && !errors.Is(ctx.Err(), context.Canceled) {
+	} else if isPathDeadDialError(err, siteOnOpen) && !errors.Is(ctx.Err(), context.Canceled) {
 		if g.passiveGuard.record(tag, true, target) {
 			g.guardQuarantined(tag)
 		}

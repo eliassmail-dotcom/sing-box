@@ -33,13 +33,13 @@ import (
 // failoverHeld returns the held nodes (TCP selection, then UDP selection if it
 // differs). Empty before the first selection.
 func (g *URLTestGroup) failoverHeld() []adapter.Outbound {
-	tcp, udp := g.selectedLx()
 	held := make([]adapter.Outbound, 0, 2)
-	if tcp != nil {
-		held = append(held, tcp)
+	selectedTCP, selectedUDP := g.selectedLx()
+	if selectedTCP != nil {
+		held = append(held, selectedTCP)
 	}
-	if udp != nil && udp != tcp {
-		held = append(held, udp)
+	if selectedUDP != nil && selectedUDP != selectedTCP {
+		held = append(held, selectedUDP)
 	}
 	return held
 }
@@ -101,7 +101,9 @@ func (g *URLTestGroup) failoverCheck(ctx context.Context) map[string]uint16 {
 		g.failoverSlow.Store(&slow)
 		defer g.failoverSlow.Store(nil)
 	}
-	g.performSelectionUpdate(false)
+	if g.performSelectionUpdate(false) {
+		g.history.NotifyUpdated()
+	}
 	return result
 }
 
@@ -126,11 +128,11 @@ func (g *URLTestGroup) failoverDegraded(node adapter.Outbound) bool {
 	if history == nil {
 		return false
 	}
-	tcp, udp := g.selectedLx()
+	selectedTCP, selectedUDP := g.selectedLx()
 	for _, network := range []string{N.NetworkTCP, N.NetworkUDP} {
-		held := tcp
+		held := selectedTCP
 		if network == N.NetworkUDP {
-			held = udp
+			held = selectedUDP
 		}
 		if held != node {
 			continue
@@ -163,7 +165,7 @@ func slowerBy(delay, than uint16, num, den int) bool {
 
 // probeNow probes one node regardless of its history age (confirmation probe).
 func (g *URLTestGroup) probeNow(ctx context.Context, node adapter.Outbound) map[string]uint16 {
-	return urlTestOutboundsLinks(ctx, g.outbound, g.history, g.logger, []adapter.Outbound{node}, g.probeLinks(), 0, false, g.penaltyReset)
+	return urlTestOutboundsLinksLx(withProbeAlive(ctx, g.penaltyReset), g.outbound, g.history, g.logger, []adapter.Outbound{node}, g.probeLinks(), 0, false)
 }
 
 // failoverSelect is the failover selection used by performSelectionUpdate.
@@ -175,12 +177,15 @@ func (g *URLTestGroup) failoverSelect(network string, reselect bool) (adapter.Ou
 		}
 	}
 	if !reselect {
-		tcp, udp := g.selectedLx()
-		current := tcp
-		if network == N.NetworkUDP {
-			current = udp
+		var current adapter.Outbound
+		selectedTCP, selectedUDP := g.selectedLx()
+		switch network {
+		case N.NetworkTCP:
+			current = selectedTCP
+		case N.NetworkUDP:
+			current = selectedUDP
 		}
-		if current != nil && g.guardAllows(RealTag(current, N.NetworkTCP)) {
+		if current != nil && g.guardAllows(RealTag(current, network)) {
 			if history := g.history.LoadURLTestHistory(RealTag(current, N.NetworkTCP)); history != nil {
 				// lx: SPEC 126 — a confirmed-slow held node yields only to a node
 				// failoverMove × faster in the fresh full run.

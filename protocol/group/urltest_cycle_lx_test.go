@@ -133,7 +133,7 @@ func TestLXCycleSmartNeverPromotesWhiteWhileBaseAlive(t *testing.T) {
 	parent := &URLTestGroup{
 		ctx: context.Background(), logger: logger.NOP(),
 		outbounds: []adapter.Outbound{base, white}, history: history,
-		priorityOutbounds: map[string]bool{"base": true},
+		lxURLTestGroup: lxURLTestGroup{priorityOutbounds: map[string]bool{"base": true}},
 	}
 	parent.setSelectedTCPLx(base)
 	got, err := parent.cycleNode(0)
@@ -164,5 +164,19 @@ func TestLXCycleRoundRobinNeedsDedicatedPolicy(t *testing.T) {
 	_, err := g.cycleNode(0)
 	if !errors.Is(err, ErrLXRoundRobin) {
 		t.Fatalf("expected explicit round-robin limitation, got %v", err)
+	}
+}
+
+func TestB50StaleHealthSelectionDoesNotUndoFallback(t *testing.T) {
+	a, b, c := newFailoverNode("a", 0), newFailoverNode("b", 0), newFailoverNode("c", 0)
+	g := newFailoverTestGroup(t, a, b, c)
+	g.setSelectedTCPLx(a)
+	expected := g.selectedForNetworkLx(N.NetworkTCP)
+	g.moveSelection(N.NetworkTCP, b)
+	if _, applied := g.updateSelectedLx(N.NetworkTCP, expected, c, true); applied {
+		t.Fatal("an older health snapshot must not overwrite a successful dial fallback")
+	}
+	if got := g.selectedForNetworkLx(N.NetworkTCP); got != b {
+		t.Fatalf("want fallback b, got %v", got)
 	}
 }
