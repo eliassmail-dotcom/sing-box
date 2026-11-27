@@ -316,11 +316,12 @@ func (g *URLTestGroup) rrSelfProbeReserved(ctx context.Context, member adapter.O
 		unused()
 		return rrProbe{err: context.Canceled, started: time.Now(), ended: time.Now()}
 	}
+	leaf := RealTag(member, N.NetworkTCP)
 	run := func(ctx context.Context) rrProbe {
-		return g.rrProbeNode(ctx, member, links, queue.release)
+		return g.rrProbeNode(ctx, member, leaf, links, queue.release)
 	}
 	var result rrProbe
-	if leaf := RealTag(member, N.NetworkTCP); leaf == "" || alone {
+	if leaf == "" || alone {
 		result = run(ctx)
 	} else {
 		result = queue.probeReserved(ctx, rrFlightKey{leaf: leaf, link: rrEndpointKey(links)}, from, run, unused)
