@@ -1,0 +1,512 @@
+name: SFI b50 LX.37 reviewed IPA
+run-name: "LX iOS | b50 LX.37 + RR multi-URL | reviewed acceptance gate"
+
+on:
+  push:
+    branches: [build/b50-lx37-migration]
+    paths: [".github/workflows/b50-ios-ipa.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Keep only the newest iOS IPA build per branch. Branch-scoped groups prevent
+# a manual dispatch on the default branch cancelling feature-branch builds.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Libbox + SFI unsigned IPA (LX)
+    runs-on: xcode-27
+    timeout-minutes: 110
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - name: Checkout (LX sources, no submodules yet)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: 92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.10
+          cache: false
+
+      - name: Assert immutable reviewed source
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536"
+          echo "Reviewed source gate: 46003950620 SUCCESS; peer review #4 GO" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify pinned sources and try exact three-way merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=6cbf8682938577d08f35defb3b11b447fafaa831
+          OLD=b5db574026d89c70136cb488a755da6398d6cfc8
+          NEW=92041d1a1bed6633a153a63d37ccc954f66c2d61
+          git merge-base --is-ancestor "$BASE" HEAD
+          git diff --exit-code "$BASE" HEAD -- . ':(exclude).github/workflows/b50*' ':(exclude)docs-lx/b50-lx37-review.md' ':(exclude)migration/b50/**'
+          test -z "$(git status --porcelain)"
+          git fetch --no-tags https://github.com/Leadaxe/sing-box-lx.git \
+            refs/tags/v1.14.4-lx.36:refs/lx/upstream36 \
+            refs/tags/v1.14.4-lx.37:refs/lx/upstream37
+          test "$(git rev-parse 'refs/lx/upstream36^{commit}')" = "$OLD"
+          test "$(git rev-parse 'refs/lx/upstream37^{commit}')" = "$NEW"
+          git merge-base --is-ancestor "$OLD" "$NEW"
+          git diff --binary --full-index "$OLD" "$NEW" -- . ':(exclude).github/workflows/**' > "$RUNNER_TEMP/lx37.patch"
+          test -s "$RUNNER_TEMP/lx37.patch"
+          set +e
+          git apply --3way --index "$RUNNER_TEMP/lx37.patch"
+          result=$?
+          set -e
+          # Apply only the reviewed-resolution overlays for exact conflict blobs.
+          # The overlays remain separate until every conflict is resolved.
+          for p in box.go common/dialer/resolve.go common/tls/client.go protocol/group/urltest.go protocol/group/urltest_failover_lx.go protocol/group/urltest_penalty_lx.go protocol/group/urltest_selected_lx.go protocol/group/urltest_tick_lx.go; do
+            test "$(git rev-parse ":1:$p")" = "$(git rev-parse "$OLD:$p")"
+            test "$(git rev-parse ":2:$p")" = "$(git rev-parse "$BASE:$p")"
+            test "$(git rev-parse ":3:$p")" = "$(git rev-parse "$NEW:$p")"
+            git show "92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536:migration/b50/resolved/$p.txt" > "$p"
+            cmp "$p" <(git show "92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536:migration/b50/resolved/$p.txt")
+            gofmt -w "$p"
+            cmp "$p" <(git show "92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536:migration/b50/resolved/$p.txt" | gofmt)
+            git add -- "$p"
+            echo "Applied pinned resolution: $p"
+          done
+          # These two companion changes adapt the clean upstream hooks and b49 guard.
+          for p in protocol/group/urltest_hooks_lx.go protocol/group/urltest_guard_lx.go protocol/group/urltest_cycle_lx_test.go; do
+            if [ "$p" = protocol/group/urltest_hooks_lx.go ]; then
+              test "$(git rev-parse ":$p")" = "$(git rev-parse "$NEW:$p")"
+            else
+              test "$(git rev-parse ":$p")" = "$(git rev-parse "$BASE:$p")"
+            fi
+            git show "92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536:migration/b50/resolved/$p.txt" > "$p"
+            cmp "$p" <(git show "92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536:migration/b50/resolved/$p.txt")
+            gofmt -w "$p"
+            cmp "$p" <(git show "92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536:migration/b50/resolved/$p.txt" | gofmt)
+            git add -- "$p"
+          done
+          # RR multi-URL overlays: exact clean LX.37 blobs, not conflict resolutions.
+          for p in protocol/group/urltest_rr_queue_lx.go protocol/group/urltest_rr_heal_lx.go protocol/group/urltest_rr_track_lx.go; do
+            test "$(git rev-parse ":$p")" = "$(git rev-parse "$NEW:$p")"
+            git show "92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536:migration/b50/resolved/$p.txt" > "$p"
+            cmp "$p" <(git show "92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536:migration/b50/resolved/$p.txt")
+            gofmt -w "$p"
+            cmp "$p" <(git show "92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536:migration/b50/resolved/$p.txt" | gofmt)
+            git add -- "$p"
+          done
+          p=protocol/group/urltest_rr_multi_b50_test.go
+          test ! -e "$p"
+          git show "92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536:migration/b50/resolved/$p.txt" > "$p"
+          gofmt -w "$p"
+          cmp "$p" <(git show "92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536:migration/b50/resolved/$p.txt" | gofmt)
+          git add -- "$p"
+          echo "### Source migration preflight" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Baseline: %s\nUpstream: %s → %s\nApply exit: %s\n' "$BASE" "$OLD" "$NEW" "$result" | tee -a "$GITHUB_STEP_SUMMARY"
+          git status --short
+          echo "Unmerged paths:"
+          git diff --name-only --diff-filter=U | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "Conflict context:"
+          git diff --cc --no-ext-diff
+          if [ -n "$(git ls-files -u)" ]; then
+            echo "::error::Source integration not yet resolved. No candidate built or published."
+            exit 1
+          fi
+          # Exact upstream documentation blobs contain two known blank lines
+          # at EOF. Check their identity, then exempt only those two paths.
+          for p in SPECS/TASKS/054-URLTEST_PENALTY_FAILOVER/HISTORY.md SPECS/TASKS/161-HTTP_CONNECT_OUTAGE_LEAK/HISTORY.md; do
+            test "$(git rev-parse ":$p")" = "$(git rev-parse "$NEW:$p")"
+          done
+          git diff --cached --check -- . ':(exclude)SPECS/TASKS/054-URLTEST_PENALTY_FAILOVER/HISTORY.md' ':(exclude)SPECS/TASKS/161-HTTP_CONNECT_OUTAGE_LEAK/HISTORY.md'
+          git diff --cached --stat
+          echo "Exact source patch and pinned resolutions applied. No publish or push performed." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Materialize exact reviewed core for build provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -c user.name=github-actions -c user.email=41898282+github-actions[bot]@users.noreply.github.com commit -m "core: reconstruct reviewed b50 LX.37 source"
+          echo "Prepared core $(git rev-parse HEAD), tree $(git rev-parse HEAD^{tree})" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Init exact upstream dependency pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          git submodule update --init --recursive submodules/utls submodules/wireguard-go submodules/sing-tun submodules/gvisor
+          test "$(git -C submodules/sing-tun rev-parse HEAD)" = 9204da09505e864d98129e8737da71b06926e0bc
+          test "$(git -C submodules/wireguard-go rev-parse HEAD)" = e587a0f47cfe9b103f134437ebe9a6751677265b
+          test "$(git -C submodules/utls rev-parse HEAD)" = 5b1d579d14864b13e142c3567ddfd4fcd320bf57
+          test "$(git -C submodules/gvisor rev-parse HEAD)" = 117243aa02fa2915cb53d1d4549bfca3a3ebf238
+
+      - name: Init reviewed Apple client
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
+          git submodule update --init clients/apple
+          git -C clients/apple fetch --no-tags origin fix/b50-lx37-compatibility
+          git -C clients/apple checkout --detach eae7921330d0e154b20a29db7c6051b9eab2a6bf
+          test "$(git -C clients/apple rev-parse HEAD)" = "eae7921330d0e154b20a29db7c6051b9eab2a6bf"
+          git -C clients/apple submodule update --init --recursive
+
+      - name: Bump complete iOS application and all extensions to build 50
+        run: |-
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("clients/apple/sing-box.xcodeproj/project.pbxproj")
+          t = p.read_text()
+          assert t.count("CURRENT_PROJECT_VERSION = 33;") >= 2, "Unexpected b33 version baseline"
+          p.write_text(t.replace("CURRENT_PROJECT_VERSION = 33;", "CURRENT_PROJECT_VERSION = 50;"))
+          assert "CURRENT_PROJECT_VERSION = 33;" not in p.read_text()
+          PY
+
+      - name: Verify signing integration sources before compilation
+        run: |-
+          test -f clients/apple/Library/Shared/SignedEntitlements.swift
+          test -f clients/apple/FileProviderExtension/SignedEntitlements.swift
+          test -f clients/apple/WidgetExtension/SignedEntitlements.swift
+          # All three physical copies must stay byte-identical: the File Provider
+          # and Widget targets compile their own copy, a silent divergence
+          # re-creates the "decoder inactive in FP" defect.
+          cmp clients/apple/Library/Shared/SignedEntitlements.swift clients/apple/FileProviderExtension/SignedEntitlements.swift
+          cmp clients/apple/Library/Shared/SignedEntitlements.swift clients/apple/WidgetExtension/SignedEntitlements.swift
+          cmp clients/apple/Library/Shared/DiagnosticsLog.swift clients/apple/FileProviderExtension/DiagnosticsLog.swift
+          cmp clients/apple/Library/Shared/DiagnosticsLog.swift clients/apple/WidgetExtension/DiagnosticsLog.swift
+          test -f clients/apple/SFUnitTests/SigningCompatibilityTests.swift
+          grep -q 'hasSharedContainer' clients/apple/Library/Shared/FilePath.swift
+          grep -q 'hasSharedContainer' clients/apple/Library/Network/ExtensionProvider.swift
+          grep -q 'hasSharedContainer' clients/apple/Library/Network/ExtensionProfile.swift
+          grep -q 'appendLimitedSubscriptionByte' clients/apple/ApplicationLibrary/LocalGenerator/LocalGeneratorEngine.swift
+          grep -q 'webViewWebContentProcessDidTerminate' clients/apple/ApplicationLibrary/LocalGenerator/LocalGeneratorEngine.swift
+          grep -q 'if tag == preferredFallbackTag || tag == legacyFallbackTag { continue }' clients/apple/Library/Network/LXProfileOverrides.swift
+          grep -q 'disallowedFields' clients/apple/Library/Network/LXProfileOverrides.swift
+          grep -q 'testProviderPairsAppearAsNodesNotGroups' clients/apple/SFUnitTests/GroupPresentationSettingsTests.swift
+          grep -q 'testLogicalPairKeepsOrdinaryFailoverAndSmartKeepsTierPriorities' clients/apple/SFUnitTests/LXProfileOverridesTests.swift
+          grep -q 'testInheritedModeNormalizationWhenOtherOverrideChangesProfile' clients/apple/SFUnitTests/LXProfileOverridesTests.swift
+          grep -q 'v1.4.48r6 Yandex generator' clients/apple/ApplicationLibrary/LocalGenerator/LocalGeneratorBundle.swift
+          grep -q 'testR6TwoGeminiNodesAndBootstrapOnDevice' clients/apple/SFUnitTests/LocalGeneratorEngineTests.swift
+          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.networking.networkextension:0' clients/apple/WidgetExtension/WidgetExtension.entitlements)" = "packet-tunnel-provider"
+          grep -q 'VPN preferences unavailable' clients/apple/WidgetExtension/WidgetTunnelControl.swift
+          test -f clients/apple/ApplicationLibrary/Views/Setting/StudioDNSSchemeModel.swift
+          test -f clients/apple/ApplicationLibrary/Views/Setting/StudioGroupCatalog.swift
+          test -f clients/apple/ApplicationLibrary/Views/Setting/StudioGroupsHomeView.swift
+          test -f clients/apple/SFUnitTests/StudioGroupCatalogTests.swift
+          grep -q 'mskix-dns-backup' clients/apple/ApplicationLibrary/LocalGenerator/LocalGeneratorBundle.swift
+          grep -q 'try await manager.loadFromPreferences()' clients/apple/WidgetExtension/WidgetTunnelControl.swift
+          grep -q 'provisionedAppGroups' clients/apple/Library/Shared/SignedEntitlements.swift
+          grep -q 'provisionedAppGroups' clients/apple/WidgetExtension/SignedEntitlements.swift
+          grep -q 'signingDiagnostics' clients/apple/Library/Shared/AppConfiguration.swift
+          grep -q 'startVPNTunnel(options:)' clients/apple/Library/Network/ExtensionProfile.swift
+          grep -q 'VPNStartStage' clients/apple/Library/Network/ExtensionProfile.swift
+          grep -q 'Last disconnect:' clients/apple/Library/Network/ExtensionProfile.swift
+          grep -q 'VPN diagnostics' clients/apple/Library/Network/ExtensionProfile.swift
+          grep -q 'currentDesiredStartOptionsForWrite' clients/apple/Library/Network/ExtensionProfile.swift
+          grep -q 'writeSnapshot(' clients/apple/Library/Network/ExtensionStartOptions.swift
+          grep -q 'Darwin.flock' clients/apple/Library/Network/ExtensionStartOptions.swift
+          test -f clients/apple/scripts/verify_unsigned_ipa.py
+          test -f clients/apple/scripts/prepare_ipa_for_signer.py
+          python3 -m py_compile clients/apple/scripts/prepare_ipa_for_signer.py
+          grep -q '<key>UIFileSharingEnabled</key>' clients/apple/SFI/Info.plist
+          grep -q '<key>LSSupportsOpeningDocumentsInPlace</key>' clients/apple/SFI/Info.plist
+          grep -q 'connectWithOneSessionRecovery' clients/apple/Library/Network/ExtensionProfile.swift
+          grep -q 'NSExtensionFileProviderDocumentGroup' clients/apple/FileProviderExtension/FileProviderExtension.swift
+          ! grep -q 'applicationSupportDirectory' clients/apple/FileProviderExtension/FileProviderExtension.swift
+          grep -q 'testDesiredSnapshotRejectsStaleRollbackWhenOnlyNonConfigOptionChanged' clients/apple/SFUnitTests/LXProfileOverridesTests.swift
+          grep -q 'testDesiredSnapshotAllowsIdempotentCommitButRejectsMissingExpectedSnapshot' clients/apple/SFUnitTests/LXProfileOverridesTests.swift
+
+      - name: Derive complete production Apple tags from build_libbox
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          text = Path("cmd/internal/build_libbox/main.go").read_text()
+          shared = []
+          for match in re.finditer(r'^\s*(?:sharedTags|darwinTags) = append\((?:sharedTags|darwinTags), ([^\n]+)\)', text, re.M):
+              shared += re.findall(r'"([^"]+)"', match.group(1))
+          apple = text.split("func buildApple() {", 1)[1].split("func ", 1)[0]
+          assert 'tags := append(sharedTags, darwinTags...)' in apple
+          assert 'tags = append(tags, "with_clash_api")' in apple
+          assert '"-tags-not-macos=with_low_memory"' in apple
+          tags = list(dict.fromkeys(shared + ["with_clash_api", "with_low_memory"]))
+          required = {"with_utls", "with_lx_chain", "with_lx_idle_suspend", "with_xhttp", "with_clash_api", "with_low_memory", "with_openconnect", "with_naive_outbound", "with_tailscale", "with_lx_impair"}
+          assert required.issubset(tags), tags
+          line = "APPLE_TAGS=" + " ".join(tags)
+          print(line)
+          with open(os.environ["GITHUB_ENV"], "a") as out:
+              out.write(line + "\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+              out.write("Production Apple tags (including iOS low-memory):\n\n\x60" + line + "\x60\n")
+          PY
+      - name: Compile prepared source with full Apple tags
+        shell: bash
+        run: |
+          go build -ldflags '-checklinkname=0' -tags "$APPLE_TAGS" ./...
+      # Darwin's default UDP maxdgram can be smaller than the Sudoku wire
+      # bound (18433 bytes). Exercise the actual oversized-datagram rejection
+      # over loopback, rather than skipping or shrinking the protocol test.
+      # This is a CI host setting only, not an iOS device capability claim.
+      - name: Provision Darwin UDP loopback test capacity
+        shell: bash
+        run: |
+          current="$(sysctl -n net.inet.udp.maxdgram)"
+          if [ "$current" -lt 18443 ]; then
+            sudo sysctl -w net.inet.udp.maxdgram=32768
+          fi
+          test "$(sysctl -n net.inet.udp.maxdgram)" -ge 18443
+          echo "Darwin UDP maxdgram for protocol tests: $(sysctl -n net.inet.udp.maxdgram); device UDP limits not validated" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: RR multi-URL focused Darwin race gate
+        shell: bash
+        run: |
+          go test -race -count=1 -timeout=3m -ldflags '-checklinkname=0' -tags "$APPLE_TAGS" ./protocol/group/ -run '^TestB50RRMulti' -v
+
+      - name: Full Apple tags regression race tests
+        shell: bash
+        run: |
+          go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' -tags "$APPLE_TAGS" ./common/dialer/ ./common/urltest/ ./common/tls/... ./option/ ./route/... ./protocol/group/... ./protocol/vless/ ./protocol/chain/ ./transport/v2rayxhttp/ ./transport/v2rayquic/ ./common/finalmask/... ./experimental/libbox/ ./dns/transport/ ./protocol/dns/ ./protocol/http/
+          go test -count=1 -timeout=8m -ldflags '-checklinkname=0' -tags "$APPLE_TAGS" ./protocol/vless/encryption/
+      - name: Assert real REALITY and prepared F3 tests are present
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -ldflags '-checklinkname=0' -tags "$APPLE_TAGS" -list 'Test(LXAdaptiveFragment|LXIPRaceRequiresActualREALITYAuthentication|LXFinalMask|LxRealityFinalMask)' ./common/tls/ | tee /tmp/ios-adaptive-full-testlist
+          grep -q '^TestLXAdaptiveFragmentConfigGate$' /tmp/ios-adaptive-full-testlist
+          grep -q '^TestLXAdaptiveFragmentCloneAndWire$' /tmp/ios-adaptive-full-testlist
+          grep -q '^TestLXIPRaceRequiresActualREALITYAuthentication$' /tmp/ios-adaptive-full-testlist
+          grep -Eq '^Test(LXFinalMask|LxRealityFinalMask)' /tmp/ios-adaptive-full-testlist
+
+      - name: Patch Go for iOS
+        run: .github/patch_go_for_ios.sh
+
+      - name: Test TLS/REALITY-verified IP race, option decoding, and VLESS reset
+        run: |-
+          grep -q 'TCPConcurrent' option/outbound.go
+          grep -q 'ResetTCPConcurrentHistory' protocol/vless/outbound.go
+          test -f common/dialer/verified_tcp_lx.go
+          grep -q 'DialVerifiedTCP' common/tls/client.go
+          go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' ./common/dialer/ ./common/tls/ ./option/ ./protocol/vless/
+          go test -race -count=1 -timeout=8m -ldflags '-checklinkname=0' \
+            -tags 'with_utls with_lx_command' \
+            -run '^TestLXIPRaceRequiresActualREALITYAuthentication$' ./common/tls/
+          go test -race -count=1 -timeout=8m -ldflags '-checklinkname=0' \
+            -tags 'with_utls with_lx_command' \
+            -run '^TestLxRealityDirectHybridRecordFragmentCombinedFirstFlight$' ./common/tls/
+
+      - name: Test FinalMask fragmentation and REALITY wire regression
+        run: |-
+          go test -race -count=1 -timeout=8m -ldflags '-checklinkname=0' -tags 'with_utls with_lx_command' -run 'Test(LXFinalMask|LxRealityFinalMask)' ./common/tls/ ./option/
+ 
+      - name: Test LX adaptive health and Smart Base-chain-White priority
+        run: |-
+          go test -race ./protocol/group -run '^TestPriorityFallback_(ThreeTierFailureRecoveryAndRotation|SecondaryValidation)$' -count=1 -timeout=90s
+          go test -race ./protocol/group -run '^TestFailover_moveOnDialFailure$' -count=1 -timeout=75s
+          go test -race ./protocol/group -count=1 -timeout=8m
+          go test -race ./protocol/group -run '^TestPriorityFallback_SelectedOutboundReadWriteRace$' -count=1 -timeout=8m
+          # Regression for long iOS PluginKitPlugin paths (Darwin sun_path=104B).
+          go test -race ./experimental/libbox -run '^TestCommandSocketPath_' -count=1 -timeout=8m
+          grep -q 'commandSocketPath()' experimental/libbox/command_server.go
+          grep -q 'commandSocketPath()' experimental/libbox/command_client.go
+
+      - name: Build Libbox.xcframework (ios/arm64 + simulator, with_clash_api via integration patch)
+        run: |-
+          make lib_install
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          git tag v1.14.4-lx.37-b50-lx37 -f
+          go run ./cmd/internal/build_libbox -target apple -platform ios/arm64,iossimulator/arm64
+          rm -rf clients/apple/Libbox.xcframework
+          cp -R Libbox.xcframework clients/apple/Libbox.xcframework
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Dump CommandClientHandler protocol (diagnostic)
+        run: |-
+          grep -n -B2 -A20 'Protocol LibboxCommandClientHandlerProtocol' clients/apple/Libbox.xcframework/ios-arm64/Libbox.framework/Headers/Libbox.h || \
+            grep -n -A20 'LibboxCommandClientHandlerProtocol' clients/apple/Libbox.xcframework/ios-arm64/Libbox.framework/Headers/Libbox.h | head -60
+
+      - name: Resolve Swift packages into isolated build directory
+        run: |
+          cd clients/apple
+          mkdir -p build/SourcePackages
+          for attempt in 1 2 3; do
+            if xcodebuild -resolvePackageDependencies -scheme SFI -clonedSourcePackagesDirPath "$PWD/build/SourcePackages"; then
+              exit 0
+            fi
+            echo "SwiftPM resolve attempt $attempt failed; retrying isolated checkout"
+            sleep 5
+          done
+          exit 1
+
+      # Libbox simulator is arm64-only; do not link its framework into x86_64.
+      # b27 compiled Swift tests, then the hosted iOS Simulator service died
+      # before any test case started. Compilation is required to publish IPA.
+      - name: Compile SFUnitTests without booting a simulator (required)
+        run: |-
+          cd clients/apple
+          xcodebuild build-for-testing -skipPackagePluginValidation \
+            -parallel-testing-enabled NO \
+            -clonedSourcePackagesDirPath "$PWD/build/SourcePackages" \
+            -scheme SFI -configuration Debug \
+            -only-testing:SFUnitTests \
+            -destination 'generic/platform=iOS Simulator' \
+            ARCHS=arm64 CODE_SIGN_IDENTITY=-
+
+      - name: Archive SFI (unsigned)
+        run: |-
+          cd clients/apple
+          rm -rf build/SFI.xcarchive
+          xcodebuild archive -skipPackagePluginValidation \
+            -clonedSourcePackagesDirPath "$PWD/build/SourcePackages" \
+            -scheme SFI -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/SFI.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+      - name: Package unsigned IPA (for GBox signing)
+        id: package_ipa
+        run: |-
+          cd clients/apple/build
+          rm -rf Payload SFI-lxpp-v1.14.9-b50-lx37-unsigned.ipa
+          mkdir Payload
+          cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
+          APP_INFO="Payload/sing-box.app/Info.plist"
+          APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO")
+          APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO")
+          test "$APP_VERSION" = "1.14.9"
+          test "$APP_BUILD" = "50"
+          echo "Packaging sing-box lx++ $APP_VERSION ($APP_BUILD)"
+          # Cross-target build consistency is mandatory for sideloaded IPA.
+          COUNT=0
+          # Only direct .appex bundle Info.plists. Recursive find also visits
+          # resource/framework plists, which need not have CFBundleVersion.
+          for extension in Payload/sing-box.app/{PlugIns,Extensions}/*.appex; do
+            test -d "$extension" || continue
+            plist="$extension/Info.plist"
+            test -f "$plist" || { echo "Missing extension Info.plist: $extension"; exit 1; }
+            EXT_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")
+            EXT_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")
+            echo "Embedded extension: $extension | version=$EXT_VERSION build=$EXT_BUILD"
+            test "$EXT_BUILD" = "$APP_BUILD" || { echo "Extension build mismatch: $plist"; exit 1; }
+            test "$EXT_VERSION" = "$APP_VERSION" || { echo "Extension marketing version mismatch: $plist"; exit 1; }
+            COUNT=$((COUNT + 1))
+          done
+          test "$COUNT" -ge 5 || { echo "Expected >=5 embedded .appex bundles, found $COUNT"; exit 1; }
+          # Verify that the archive includes the App Intents metadata, not just the widget binary.
+          WIDGET_META="Payload/sing-box.app/PlugIns/WidgetExtension.appex/Metadata.appintents"
+          test -d "$WIDGET_META"
+          test -n "$(find "$WIDGET_META" -type f -size +0c -print -quit)"
+          find "$WIDGET_META" -type f -print
+          # Provenance manifest is included in the unsigned .app before signing.
+          cat > Payload/sing-box.app/LXBuildManifest.json <<EOF
+          {
+            "product": "SFI LX++",
+            "appVersion": "1.14.9",
+            "build": 50,
+            "appleCommit": "$(git -C .. rev-parse HEAD)",
+            "coreCommit": "$(git -C ../../.. rev-parse HEAD)",
+            "preparedCoreTree": "$(git -C ../../.. rev-parse HEAD^{tree})",
+            "workflowCommit": "${GITHUB_SHA}",
+            "b40BaselineQA": "45388347038",
+            "deliveryStatus": "Candidate; delivery requires this run passing regression and XCTest gates",
+            "mergedUpstream": "Leadaxe/sing-box-lx/v1.14.4-lx.37",
+            "embeddedGeneratorVersion": "v1.4.48r6",
+            "tcpConcurrent": "opt-in verified TLS/REALITY per outbound",
+            "finalMask": "experimental TCP/UDP masks and QUIC options; opt-in extended generator",
+            "coreBaseline": "b49 + exact LX.37 delta + 15 reviewed overlays",
+            "reviewedSourceGate": "46003950620",
+            "reviewedSourceCommit": "92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536",
+            "peerReview": "GLM #4 GO",
+            "appleBaseline": "b49 + reviewed LX.37 profile compatibility; b46 signing/startup retained",
+            "validation": ["full protocol/group go -race", "authenticated TLS/REALITY IP race go -race", "direct hybrid X25519MLKEM768 + record_fragment go -race", "SFUnitTests compiled", "iOS archive", "target build consistency"],
+            "simulatorRuntimeStatus": "see workflow XCTest evidence; not asserted at packaging"
+          }
+          EOF
+          zip -qry SFI-lxpp-v1.14.9-b50-lx37-unsigned.ipa Payload
+          test -s SFI-lxpp-v1.14.9-b50-lx37-unsigned.ipa
+          unzip -tq SFI-lxpp-v1.14.9-b50-lx37-unsigned.ipa
+          # Fail before publishing an IPA whose extension IDs, App Groups or
+          # static File Provider Document Group are inconsistent. This does not
+          # validate the signed identities that GBox chooses later.
+          python3 ../scripts/verify_unsigned_ipa.py SFI-lxpp-v1.14.9-b50-lx37-unsigned.ipa --build 50 | tee signing-preflight.json
+          ls -lh SFI-lxpp-v1.14.9-b50-lx37-unsigned.ipa
+
+      # The IPA can be built even if Apple's hosted simulator is unavailable,
+      # but such an artifact must never appear as a VERIFIED release.
+      - name: Run SFUnitTests on hosted simulator (acceptance gate)
+        id: simulator_tests
+        timeout-minutes: 15
+        run: |-
+          SIM=$(xcrun simctl list devices available -j | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)
+          for dev in d['devices'].values():
+              for x in dev:
+                  if x['isAvailable'] and x['name'].startswith('iPhone'):
+                      print(x['name']); raise SystemExit
+          sys.exit(1)
+          ")
+          echo "Using simulator: $SIM"
+          cd clients/apple
+          rm -rf build/LXTests.xcresult
+          xcodebuild test -skipPackagePluginValidation \
+            -resultBundlePath "$PWD/build/LXTests.xcresult" \
+            -parallel-testing-enabled NO \
+            -clonedSourcePackagesDirPath "$PWD/build/SourcePackages" \
+            -scheme SFI -configuration Debug \
+            -only-testing:SFUnitTests \
+            -destination "platform=iOS Simulator,name=$SIM" \
+            ARCHS=arm64 CODE_SIGN_IDENTITY=-
+          # Exit 0 alone is insufficient: reject zero tests or missing results.
+          xcrun xcresulttool get test-results summary --path build/LXTests.xcresult --format json > build/XCTestSummary.json
+          python3 - <<'PY'
+          import json
+          with open('build/XCTestSummary.json',encoding='utf-8') as f: j=json.load(f)
+          total=j.get('totalTestCount',0)
+          fails=j.get('failedTests',0)
+          status=j.get('result','')
+          print(f"XCTest summary: {total} tests; {fails} failures; result={status}")
+          if total < 1 or fails != 0 or status not in ('Passed','Success'):
+              raise SystemExit("XCTest not completed and passed")
+          PY
+
+      - name: Upload XCTest evidence
+        if: ${{ always() && steps.simulator_tests.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: SFI-lx-b50-lx37-xctest-evidence
+          path: |
+            clients/apple/build/LXTests.xcresult
+            clients/apple/build/XCTestSummary.json
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 1
+
+      - name: Final unsigned IPA smoke verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd clients/apple/build
+          ipa=SFI-lxpp-v1.14.9-b50-lx37-unsigned.ipa
+          unzip -tq "$ipa"
+          python3 ../scripts/verify_unsigned_ipa.py "$ipa" --build 50
+          shasum -a 256 "$ipa" | tee "$ipa.sha256"
+          cat "$ipa.sha256" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload candidate only after required checks pass
+        if: ${{ success() && steps.package_ipa.outcome == 'success' && steps.simulator_tests.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: SFI-lxpp-v1.14.9-b50-lx37-XCTEST-PASSED-unsigned-ipa
+          path: |
+            clients/apple/build/SFI-lxpp-v1.14.9-b50-lx37-unsigned.ipa
+            clients/apple/build/SFI-lxpp-v1.14.9-b50-lx37-unsigned.ipa.sha256
+            clients/apple/build/signing-preflight.json
+            clients/apple/build/XCTestSummary.json
+            clients/apple/scripts/prepare_ipa_for_signer.py
+            clients/apple/RELEASE_NOTES_B33.md
+          compression-level: 1
