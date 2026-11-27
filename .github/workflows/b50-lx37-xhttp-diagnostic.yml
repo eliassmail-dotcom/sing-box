@@ -125,7 +125,10 @@ jobs:
           test "$(git -C submodules/wireguard-go rev-parse HEAD)" = e587a0f47cfe9b103f134437ebe9a6751677265b
           test "$(git -C submodules/utls rev-parse HEAD)" = 5b1d579d14864b13e142c3567ddfd4fcd320bf57
           test "$(git -C submodules/gvisor rev-parse HEAD)" = 117243aa02fa2915cb53d1d4549bfca3a3ebf238
-      - name: Derive complete production Apple tags
+      - name: Derive comparable production Apple tags
+        id: tags
+        env:
+          DIAGNOSTIC_SOURCE: ${{ matrix.source }}
         shell: bash
         run: |
           python3 - <<'PY'
@@ -137,7 +140,10 @@ jobs:
               shared += re.findall(r'"([^"]+)"', match.group(1))
           apple = text.split("func buildApple() {", 1)[1].split("func ", 1)[0]
           assert 'tags := append(sharedTags, darwinTags...)' in apple
-          assert 'tags = append(tags, "with_clash_api")' in apple
+          if os.environ["DIAGNOSTIC_SOURCE"] == "candidate":
+              assert 'tags = append(tags, "with_clash_api")' in apple
+          # The clean upstream Apple build does not append clash_api; use the
+          # candidate production tag set for both diagnostic variants.
           assert '"-tags-not-macos=with_low_memory"' in apple
           tags = list(dict.fromkeys(shared + ["with_clash_api", "with_low_memory"]))
           required = {"with_gvisor","with_quic","with_wireguard","with_utls","with_lx_chain","with_lx_idle_suspend","with_xhttp","with_clash_api","with_low_memory","with_openconnect","with_naive_outbound","with_tailscale","with_lx_impair"}
@@ -166,7 +172,7 @@ jobs:
           set -euo pipefail
           go test -race -count=20 -timeout=2m -ldflags '-checklinkname=0 -extldflags=-fuse-ld=lld' -tags "$APPLE_TAGS" ./transport/v2rayxhttp/ -run '^TestPacketUpFailedPostFailsStream$' -v
       - name: Full XHTTP package with production tags
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.tags.conclusion == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
