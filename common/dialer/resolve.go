@@ -232,3 +232,12 @@ func (d *resolveParallelNetworkDialer) QueryOptions() adapter.DNSQueryOptions {
 func (d *resolveParallelNetworkDialer) Upstream() any {
 	return d.dialer
 }
+
+// Only forward the explicit ICMP socket capability. Never unwrap a
+// detour into a direct connection, and never invoke a DNS fallback.
+func(d *resolveDialer)ListenXICMP(ctx context.Context,destination netip.Addr,dgram bool)(net.PacketConn,error){
+	if upstream,ok:=d.dialer.(interface{ListenXICMP(context.Context,netip.Addr,bool)(net.PacketConn,error)});ok{
+		return upstream.ListenXICMP(ctx,destination,dgram)
+	}
+	return nil,E.New("XICMP requires a direct ICMP-capable dialer")
+}

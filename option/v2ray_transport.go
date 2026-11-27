@@ -112,7 +112,10 @@ type V2RayWebsocketOptions struct {
 	EarlyDataHeaderName string               `json:"early_data_header_name,omitempty"`
 }
 
-type V2RayQUICOptions struct{}
+type V2RayQUICOptions struct {
+	FinalMaskUDP []LXFinalMaskUDPMaskOptions `json:"finalmask_udp,omitempty"`
+	QUICParams *LXFinalMaskQUICParams `json:"quic_params,omitempty"`
+}
 
 type V2RayGRPCOptions struct {
 	ServiceName         string             `json:"service_name,omitempty"`

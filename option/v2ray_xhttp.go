@@ -20,6 +20,9 @@ import "github.com/sagernet/sing/common/json/badoption"
 // selects the documented default. This mirrors x_padding_bytes and avoids adding a
 // range type to the option layer.
 type V2RayXHTTPOptions struct {
+	FinalMaskUDP []LXFinalMaskUDPMaskOptions `json:"finalmask_udp,omitempty"`
+	QUICParams *LXFinalMaskQUICParams `json:"quic_params,omitempty"`
+
 	// ---- v1 fields (unchanged, preserved verbatim) --------------------------
 
 	// Host overrides the HTTP Host header (defaults to the TLS SNI or the

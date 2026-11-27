@@ -7,6 +7,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/outbound"
 	"github.com/sagernet/sing-box/common/dialer"
+	"github.com/sagernet/sing-box/common/finalmask"
 	"github.com/sagernet/sing-box/common/mux"
 	"github.com/sagernet/sing-box/common/tls"
 	"github.com/sagernet/sing-box/common/urltest"
@@ -53,9 +54,20 @@ type Outbound struct {
 	encryption *encryption.ClientInstance
 	ipWarmup *urltest.IPWarmupCoordinator
 	ipWarmupEligible bool
+	finalMaskTCP *finalmask.TCPFragment
+	finalMaskHeader *finalmask.TCPHeader
+	finalMaskChain *finalmask.TCPChain
 }
 
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.VLESSOutboundOptions) (adapter.Outbound, error) {
+	mask, err := prepareTCPFragment(options)
+	if err != nil {
+		return nil, err
+	}
+	header, err := prepareTCPHeader(options)
+	if err != nil { return nil, err }
+	chain, err := prepareTCPChain(options)
+	if err != nil { return nil, err }
 	outboundDialer, err := dialer.New(ctx, options.DialerOptions, options.ServerIsDomain())
 	if err != nil {
 		return nil, err
@@ -65,6 +77,9 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		logger:     logger,
 		dialer:     outboundDialer,
 		serverAddr: options.ServerOptions.Build(),
+		finalMaskTCP: mask,
+		finalMaskHeader: header,
+		finalMaskChain: chain,
 		ipWarmup: service.PtrFromContext[urltest.IPWarmupCoordinator](ctx),
 	}
 	if options.TLS != nil {
@@ -249,6 +264,17 @@ func (h *vlessDialer) DialContext(ctx context.Context, network string, destinati
 	if err != nil {
 		return nil, err
 	}
+	if h.finalMaskChain != nil {
+		conn, err = h.finalMaskChain.Wrap(ctx, conn)
+		if err != nil { return nil, err }
+	}
+	if h.finalMaskHeader != nil {
+		conn, err = h.finalMaskHeader.Handshake(ctx, conn)
+		if err != nil { return nil, err }
+	}
+	if h.finalMaskTCP != nil {
+		conn = h.finalMaskTCP.Wrap(conn)
+	}
 	conn, err = h.wrapEncryption(ctx, conn)
 	if err != nil {
 		return nil, err
@@ -296,6 +322,17 @@ func (h *vlessDialer) ListenPacket(ctx context.Context, destination M.Socksaddr)
 		common.Close(conn)
 		return nil, err
 	}
+	if h.finalMaskChain != nil {
+		conn, err = h.finalMaskChain.Wrap(ctx, conn)
+		if err != nil { return nil, err }
+	}
+	if h.finalMaskHeader != nil {
+		conn, err = h.finalMaskHeader.Handshake(ctx, conn)
+		if err != nil { return nil, err }
+	}
+	if h.finalMaskTCP != nil {
+		conn = h.finalMaskTCP.Wrap(conn)
+	}
 	conn, err = h.wrapEncryption(ctx, conn)
 	if err != nil {
 		return nil, err
@@ -314,4 +351,48 @@ func (h *vlessDialer) ListenPacket(ctx context.Context, destination M.Socksaddr)
 	} else {
 		return h.client.DialEarlyPacketConn(conn, destination)
 	}
+}
+
+// Keep the first transport-layer integration deliberately limited to plain
+// VLESS. Do not shadow the dialer's adaptive verified-race interfaces or stack
+// it with a TLS/REALITY mask or an HTTP transport.
+func prepareTCPFragment(options option.VLESSOutboundOptions) (*finalmask.TCPFragment, error) {
+	if options.FinalMaskTCPFragment == nil {
+		return nil, nil
+	}
+	if options.TLS != nil && (options.TLS.Enabled || options.TLS.FinalMaskFragment != nil) {
+		return nil, E.New("finalmask_tcp_fragment: TLS/REALITY is not supported yet")
+	}
+	if options.Transport != nil || options.Flow != "" {
+		return nil, E.New("finalmask_tcp_fragment: only plain VLESS transport without flow is supported")
+	}
+	return finalmask.NewTCPFragment(options.FinalMaskTCPFragment)
+}
+
+func prepareTCPHeader(options option.VLESSOutboundOptions) (*finalmask.TCPHeader, error) {
+	if options.FinalMaskTCPHeader == nil { return nil, nil }
+	if options.FinalMaskTCPFragment != nil {
+		return nil, E.New("finalmask_tcp_header: mask stacking is not supported yet")
+	}
+	if options.TLS != nil && (options.TLS.Enabled || options.TLS.FinalMaskFragment != nil) {
+		return nil, E.New("finalmask_tcp_header: TLS/REALITY is not supported yet")
+	}
+	if options.Transport != nil || options.Flow != "" {
+		return nil, E.New("finalmask_tcp_header: only plain VLESS transport without flow is supported")
+	}
+	return finalmask.NewTCPHeader(options.FinalMaskTCPHeader)
+}
+
+func prepareTCPChain(options option.VLESSOutboundOptions) (*finalmask.TCPChain, error) {
+	if len(options.FinalMaskTCP) == 0 { return nil, nil }
+	if options.FinalMaskTCPFragment != nil || options.FinalMaskTCPHeader != nil {
+		return nil, E.New("finalmask_tcp: cannot combine ordered masks and legacy fields")
+	}
+	if options.TLS != nil && (options.TLS.Enabled || options.TLS.FinalMaskFragment != nil) {
+		return nil, E.New("finalmask_tcp: TLS/REALITY is not supported yet")
+	}
+	if options.Transport != nil || options.Flow != "" {
+		return nil, E.New("finalmask_tcp: only plain VLESS transport without flow is supported")
+	}
+	return finalmask.NewTCPChain(options.FinalMaskTCP)
 }

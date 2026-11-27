@@ -1,0 +1,124 @@
+name: FinalMask parity tests
+on:
+  push:
+    branches: [feature/finalmask-parity]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  finalmask:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Initialize core dependencies
+        run: git submodule update --init --recursive submodules/wireguard-go submodules/sing-tun submodules/gvisor submodules/utls
+      - name: Targeted FinalMask regression gate
+        run: |
+          go test -race -count=1 -timeout=8m -ldflags '-checklinkname=0' -tags 'with_utls with_lx_command' -run 'Test(LXFinalMask|LxRealityFinalMask)' ./common/tls/ ./common/finalmask/... ./option/ ./protocol/vless/
+
+      - name: QUIC and XHTTP integration gate
+        run: go test -race -count=1 -timeout=8m -ldflags '-checklinkname=0' -tags 'with_utls with_quic with_xhttp with_lx_command' -run 'Test(LXFinalMask|HTTP3StreamOneRoundTrip|HTTP3KeepAlivePeriod)' ./transport/v2rayquic/ ./transport/v2rayxhttp/ ./common/finalmask/ ./option/
+
+      - name: Original Xray XMC regression suite
+        run: go test -race -count=1 -timeout=8m ./common/finalmask/xmc/
+
+  comprehensive:
+    name: Full LX regression / ${{ matrix.suite }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [reliability, routing, transports, masks]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Initialize dependencies
+        run: git submodule update --init --recursive submodules/wireguard-go submodules/sing-tun submodules/gvisor submodules/utls
+      - name: Derive Apple low-memory feature tags
+        run: |
+          python3 - <<'PY'
+          import os,re
+          from pathlib import Path
+          text=Path('cmd/internal/build_libbox/main.go').read_text()
+          tags=[]
+          for m in re.finditer(r'^\s*(?:sharedTags|darwinTags) = append\((?:sharedTags|darwinTags), ([^\n]+)\)',text,re.M):
+              tags+=re.findall(r'"([^"]+)"',m.group(1))
+          tags=list(dict.fromkeys(tags+['with_clash_api','with_low_memory']))
+          assert {'with_utls','with_quic','with_xhttp','with_lx_chain','with_low_memory','with_openconnect','with_tailscale'}.issubset(tags)
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('LX_TEST_TAGS='+' '.join(tags)+'\n')
+          print(tags)
+          PY
+      - name: Comprehensive tests (race detector)
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.suite }}" in
+            reliability)
+              packages=(./common/dialer/ ./common/urltest/ ./common/lxsniffguard/ ./common/lxdatagram/ ./common/tls/ ./protocol/group/)
+              ;;
+            routing)
+              packages=(./option/ ./route/... ./dns/... ./protocol/chain/ ./protocol/dns/ ./protocol/http/)
+              ;;
+            transports)
+              packages=(./protocol/vless/ ./transport/v2rayquic/ ./transport/v2rayxhttp/ ./protocol/hysteria2/ ./protocol/tuic/)
+              ;;
+            masks)
+              packages=(./common/finalmask/...)
+              ;;
+          esac
+          go test -race -count=1 -timeout=15m -ldflags '-checklinkname=0' -tags "$LX_TEST_TAGS" "${packages[@]}"
+      # Match the existing Linux lx-ci BASE_TAGS for libbox. Static Cronet
+      # is not linkable by the hosted Linux gcc/ld in this Apple-tag test.
+      - name: Linux libbox regression (purego)
+        if: matrix.suite == 'routing'
+        run: go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' -tags "$LX_TEST_TAGS with_purego" ./experimental/libbox/
+      # As in the original b41 acceptance workflow, Vision's dependency
+      # uses unsafe pointer arithmetic incompatible with checkptr under -race.
+      # Keep the full package suite, but run this package without -race.
+      - name: VLESS encryption and Vision regression
+        if: matrix.suite == 'transports'
+        run: go test -count=1 -timeout=8m -ldflags '-checklinkname=0' -tags "$LX_TEST_TAGS" ./protocol/vless/encryption/
+      - name: Repeat FinalMask lifecycle tests
+        if: matrix.suite == 'masks'
+        run: go test -race -count=5 -timeout=10m -ldflags '-checklinkname=0' -tags "$LX_TEST_TAGS" -run 'TestLXFinalMask(XDNS|UDPHop|Realm|XICMP|UDPStandalone)' ./common/finalmask/
+
+  platform:
+    name: Cross compile LX / ${{ matrix.goos }} ${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: windows
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Initialize dependencies
+        run: git submodule update --init --recursive submodules/wireguard-go submodules/sing-tun submodules/gvisor submodules/utls
+      - name: Build production-tagged core CLI
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAGS="$(make -s -f Makefile.lx lx-print-tags)"
+          go build -trimpath -ldflags '-checklinkname=0' -tags "$TAGS" -o "$RUNNER_TEMP/lx-core" ./cmd/sing-box
+          test -s "$RUNNER_TEMP/lx-core"
