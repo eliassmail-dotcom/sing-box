@@ -1,10 +1,10 @@
-name: SFI LX++ b41 LX.36 migration
-run-name: "LX iOS | b41 F1-F3 + LX.36 | unsigned IPA | regression gate"
+name: SFI LX++ b46 signing + startup
+run-name: "LX iOS | b46 + LX.36 | signing/startup eeba48d | regression gate"
 
 on:
   push:
     branches:
-      - build/b41-lx36-migration
+      - ci/b46-signing-startup
   workflow_dispatch:
 
 permissions:
@@ -101,9 +101,9 @@ jobs:
         run: |-
           git config submodule.clients/apple.url https://github.com/eliassmail-dotcom/sing-box-for-apple.git
           git submodule update --init --recursive
-          git -C clients/apple fetch --no-tags origin fix/b41-lx36-wg-idle
-          git -C clients/apple checkout --detach ad85702c1980352f2b67187516a89d65da96b354
-          test "$(git -C clients/apple rev-parse HEAD)" = "ad85702c1980352f2b67187516a89d65da96b354"
+          git -C clients/apple fetch --no-tags origin fix/b46-signing-startup
+          git -C clients/apple checkout --detach eeba48d5b65cd13513ece5166a4427136394e5e3
+          test "$(git -C clients/apple rev-parse HEAD)" = "eeba48d5b65cd13513ece5166a4427136394e5e3"
           git -C clients/apple submodule update --init --recursive
           git -C clients/apple rev-parse HEAD
           for dep in utls wireguard-go sing-tun gvisor; do
@@ -111,14 +111,14 @@ jobs:
             test "$(git -C "submodules/$dep" rev-parse HEAD)" = "$(git rev-parse "HEAD:submodules/$dep")"
           done
 
-      - name: Bump complete iOS application and all extensions to build 41
+      - name: Bump complete iOS application and all extensions to build 46
         run: |-
           python3 - <<'PY'
           from pathlib import Path
           p = Path("clients/apple/sing-box.xcodeproj/project.pbxproj")
           t = p.read_text()
           assert t.count("CURRENT_PROJECT_VERSION = 33;") >= 2, "Unexpected b33 version baseline"
-          p.write_text(t.replace("CURRENT_PROJECT_VERSION = 33;", "CURRENT_PROJECT_VERSION = 41;"))
+          p.write_text(t.replace("CURRENT_PROJECT_VERSION = 33;", "CURRENT_PROJECT_VERSION = 46;"))
           assert "CURRENT_PROJECT_VERSION = 33;" not in p.read_text()
           PY
 
@@ -127,6 +127,13 @@ jobs:
           test -f clients/apple/Library/Shared/SignedEntitlements.swift
           test -f clients/apple/FileProviderExtension/SignedEntitlements.swift
           test -f clients/apple/WidgetExtension/SignedEntitlements.swift
+          # All three physical copies must stay byte-identical: the File Provider
+          # and Widget targets compile their own copy, a silent divergence
+          # re-creates the "decoder inactive in FP" defect.
+          cmp clients/apple/Library/Shared/SignedEntitlements.swift clients/apple/FileProviderExtension/SignedEntitlements.swift
+          cmp clients/apple/Library/Shared/SignedEntitlements.swift clients/apple/WidgetExtension/SignedEntitlements.swift
+          cmp clients/apple/Library/Shared/DiagnosticsLog.swift clients/apple/FileProviderExtension/DiagnosticsLog.swift
+          cmp clients/apple/Library/Shared/DiagnosticsLog.swift clients/apple/WidgetExtension/DiagnosticsLog.swift
           test -f clients/apple/SFUnitTests/SigningCompatibilityTests.swift
           grep -q 'hasSharedContainer' clients/apple/Library/Shared/FilePath.swift
           grep -q 'hasSharedContainer' clients/apple/Library/Network/ExtensionProvider.swift
@@ -252,7 +259,7 @@ jobs:
         run: |-
           make lib_install
           export PATH="$PATH:$(go env GOPATH)/bin"
-          git tag v1.14.4-lx.36-b41 -f
+          git tag v1.14.4-lx.36-b46 -f
           go run ./cmd/internal/build_libbox -target apple -platform ios/arm64,iossimulator/arm64
           rm -rf clients/apple/Libbox.xcframework
           cp -R Libbox.xcframework clients/apple/Libbox.xcframework
@@ -307,14 +314,14 @@ jobs:
         id: package_ipa
         run: |-
           cd clients/apple/build
-          rm -rf Payload SFI-lxpp-v1.14.9-b41-lx36-F1-F3-unsigned.ipa
+          rm -rf Payload SFI-lxpp-v1.14.9-b46-lx36-diagnostics-unsigned.ipa
           mkdir Payload
           cp -R SFI.xcarchive/Products/Applications/sing-box.app Payload/
           APP_INFO="Payload/sing-box.app/Info.plist"
           APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO")
           test "$APP_VERSION" = "1.14.9"
-          test "$APP_BUILD" = "41"
+          test "$APP_BUILD" = "46"
           echo "Packaging sing-box lx++ $APP_VERSION ($APP_BUILD)"
           # Cross-target build consistency is mandatory for sideloaded IPA.
           COUNT=0
@@ -332,12 +339,17 @@ jobs:
             COUNT=$((COUNT + 1))
           done
           test "$COUNT" -ge 5 || { echo "Expected >=5 embedded .appex bundles, found $COUNT"; exit 1; }
+          # Verify that the archive includes the App Intents metadata, not just the widget binary.
+          WIDGET_META="Payload/sing-box.app/PlugIns/WidgetExtension.appex/Metadata.appintents"
+          test -d "$WIDGET_META"
+          test -n "$(find "$WIDGET_META" -type f -size +0c -print -quit)"
+          find "$WIDGET_META" -type f -print
           # Provenance manifest is included in the unsigned .app before signing.
           cat > Payload/sing-box.app/LXBuildManifest.json <<EOF
           {
             "product": "SFI LX++",
             "appVersion": "1.14.9",
-            "build": 41,
+            "build": 46,
             "appleCommit": "$(git -C .. rev-parse HEAD)",
             "coreCommit": "$(git -C ../../.. rev-parse HEAD)",
             "preparedCoreTree": "$(git -C ../../.. rev-parse HEAD^{tree})",
@@ -353,14 +365,14 @@ jobs:
             "simulatorRuntimeStatus": "see workflow XCTest evidence; not asserted at packaging"
           }
           EOF
-          zip -qry SFI-lxpp-v1.14.9-b41-lx36-F1-F3-unsigned.ipa Payload
-          test -s SFI-lxpp-v1.14.9-b41-lx36-F1-F3-unsigned.ipa
-          unzip -tq SFI-lxpp-v1.14.9-b41-lx36-F1-F3-unsigned.ipa
+          zip -qry SFI-lxpp-v1.14.9-b46-lx36-diagnostics-unsigned.ipa Payload
+          test -s SFI-lxpp-v1.14.9-b46-lx36-diagnostics-unsigned.ipa
+          unzip -tq SFI-lxpp-v1.14.9-b46-lx36-diagnostics-unsigned.ipa
           # Fail before publishing an IPA whose extension IDs, App Groups or
           # static File Provider Document Group are inconsistent. This does not
           # validate the signed identities that GBox chooses later.
-          python3 ../scripts/verify_unsigned_ipa.py SFI-lxpp-v1.14.9-b41-lx36-F1-F3-unsigned.ipa --build 41 | tee signing-preflight.json
-          ls -lh SFI-lxpp-v1.14.9-b41-lx36-F1-F3-unsigned.ipa
+          python3 ../scripts/verify_unsigned_ipa.py SFI-lxpp-v1.14.9-b46-lx36-diagnostics-unsigned.ipa --build 46 | tee signing-preflight.json
+          ls -lh SFI-lxpp-v1.14.9-b46-lx36-diagnostics-unsigned.ipa
 
       # The IPA can be built even if Apple's hosted simulator is unavailable,
       # but such an artifact must never appear as a VERIFIED release.
@@ -405,7 +417,7 @@ jobs:
         if: ${{ always() && steps.simulator_tests.outcome != 'skipped' }}
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lx-b41-lx36-xctest-evidence
+          name: SFI-lx-b46-lx36-xctest-evidence
           path: |
             clients/apple/build/LXTests.xcresult
             clients/apple/build/XCTestSummary.json
@@ -417,9 +429,9 @@ jobs:
         if: ${{ success() && steps.package_ipa.outcome == 'success' && steps.simulator_tests.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
-          name: SFI-lxpp-v1.14.9-b41-lx36-F1-F3-XCTEST-PASSED-unsigned-ipa
+          name: SFI-lxpp-v1.14.9-b46-lx36-diagnostics-XCTEST-PASSED-unsigned-ipa
           path: |
-            clients/apple/build/SFI-lxpp-v1.14.9-b41-lx36-F1-F3-unsigned.ipa
+            clients/apple/build/SFI-lxpp-v1.14.9-b46-lx36-diagnostics-unsigned.ipa
             clients/apple/scripts/prepare_ipa_for_signer.py
             clients/apple/RELEASE_NOTES_B33.md
           compression-level: 1
