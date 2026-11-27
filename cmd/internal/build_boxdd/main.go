@@ -226,6 +226,18 @@ func buildTags(operatingSystem string, architecture string, cgoEnabled bool) ([]
 		return nil, E.Cause(err, "read build tags")
 	}
 	tags := strings.Split(strings.TrimSpace(string(content)), ",")
+	// lx:begin build-parity
+	// The daemon carries the same feature set as the libbox AAR/XCUIKit
+	// (cmd/internal/build_libbox): xhttp and awg transports, the lx command
+	// extensions (StartConnectionTest & co), chain and trusttunnel outbounds.
+	// Without these tags a config that works on the mobile clients fails here
+	// ("unknown transport type: xhttp" and the like). with_lx_impair adds the
+	// test `impair` outbound (SPEC 164) present in the b50 mobile sets.
+	// with_lx_idle_suspend stays out — a mobile-only power feature, deliberately
+	// omitted from desktop sets (see build_libbox); with_lxd gates the CLI lxd
+	// daemon the boxdd binary does not use.
+	tags = append(tags, "with_xhttp", "with_awg", "with_lx_command", "with_lx_chain", "with_trusttunnel", "with_lx_impair")
+	// lx:end build-parity
 	if operatingSystem == "windows" {
 		tags = append(tags, "with_external_windivert", "with_external_usbip_drivers")
 	}
