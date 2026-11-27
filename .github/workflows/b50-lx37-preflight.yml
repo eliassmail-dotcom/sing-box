@@ -134,6 +134,10 @@ jobs:
         run: |
           set -euo pipefail
           clang --version
+          if ! command -v ld.lld >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y lld
+          fi
           ld.lld --version
           echo "CC=clang" >> "$GITHUB_ENV"
           echo "CXX=clang++" >> "$GITHUB_ENV"
