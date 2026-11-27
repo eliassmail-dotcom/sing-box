@@ -1,0 +1,72 @@
+name: b50 Apple profile compatibility unit tests
+run-name: "b50 | Apple profile and group logic (isolated Swift tests)"
+on:
+  push:
+    branches: [build/b50-lx37-migration]
+    paths: [".github/workflows/b50-apple-profile-tests.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: b50-apple-profile-tests-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  profile-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Fetch exact Apple candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --no-checkout --filter=blob:none https://github.com/eliassmail-dotcom/sing-box-for-apple.git "$RUNNER_TEMP/apple"
+          git -C "$RUNNER_TEMP/apple" checkout --detach de1fa8e747dbef2ce8e93add8cee16172730c3e8
+          test "$(git -C "$RUNNER_TEMP/apple" rev-parse HEAD)" = de1fa8e747dbef2ce8e93add8cee16172730c3e8
+      - name: Test actual Foundation profile sources and XCTest cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          swift --version
+          mkdir -p "$RUNNER_TEMP/swift-profile/Sources/Library" "$RUNNER_TEMP/swift-profile/Sources/Libbox" "$RUNNER_TEMP/swift-profile/Tests/ProfileTests"
+          cd "$RUNNER_TEMP/swift-profile"
+          cat > Package.swift <<'EOF'
+          // swift-tools-version: 5.9
+          import PackageDescription
+          let package = Package(name: "B50ProfileTests", targets: [
+              .target(name: "Libbox"),
+              .target(name: "Library", dependencies: ["Libbox"]),
+              .testTarget(name: "ProfileTests", dependencies: ["Library"])
+          ])
+          EOF
+          # Only the Go bridge is stubbed. Profile transformation, presentation
+          # model and XCTest cases are compiled directly from the pinned commit.
+          cat > Sources/Libbox/Bridge.swift <<'EOF'
+          public func LibboxProxyDisplayType(_ type: String) -> String { type }
+          public final class LibboxOutboundGroupItem {
+              public var tag = ""
+              public var type = ""
+              public var urlTestTime: Int64 = 0
+              public var urlTestDelay: Int32 = 0
+          }
+          public final class GroupItems {
+              public func hasNext() -> Bool { false }
+              public func next() -> LibboxOutboundGroupItem? { nil }
+          }
+          public final class LibboxOutboundGroup {
+              public var tag = ""
+              public var type = ""
+              public var selected = ""
+              public var selectable = false
+              public var isExpand = false
+              public func getItems() -> GroupItems? { nil }
+          }
+          EOF
+          for file in LXGeminiBuilder LXProfileOverrides GroupPresentationSettings OutboundGroup; do
+            cp "$RUNNER_TEMP/apple/Library/Network/$file.swift" Sources/Library/
+          done
+          for file in LXGeminiBuilderTests GroupPresentationSettingsTests; do
+            cp "$RUNNER_TEMP/apple/SFUnitTests/$file.swift" Tests/ProfileTests/
+          done
+          swift test 2>&1 | tee "$RUNNER_TEMP/swift-profile-test.log"
+          grep -E 'Executed [1-9][0-9]* tests?, with 0 failures' "$RUNNER_TEMP/swift-profile-test.log"
+          echo "Isolated Swift logic only; real Libbox, Xcode, iOS simulator and IPA still required." >> "$GITHUB_STEP_SUMMARY"
