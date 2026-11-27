@@ -1,0 +1,118 @@
+name: SFI b51 App Groups
+run-name: SFI b51 • signing, storage and VPN startup
+on:
+  push:
+    branches: [build/b51-app-groups-first-start]
+    paths: ['.github/workflows/b51-apple.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  # Filled only for a reviewed client checkout. An empty pin primes Libbox alone.
+  APPLE_SHA: ''
+  CORE_TREE: a078a680649b5f33b3839c05a4e0f489781ffc87
+  CORE_GATE: 92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536
+  CORE_RECIPE: 50244466380951e8dedd1f8c892771a220e1ad91
+  GOTOOLCHAIN: local
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Restore reviewed device and simulator framework
+        id: framework
+        uses: actions/cache/restore@v4
+        with:
+          path: Libbox.xcframework
+          key: b51-libbox-b50-a078a680-go12610-xcode27-v1
+      - if: steps.framework.outputs.cache-hit != 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.10
+          cache: false
+      - name: Reproduce the exact release b50 core and build flags
+        if: steps.framework.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CORE_GATE"
+          # Reuse the pinned, successful b50 Darwin build recipe verbatim.
+          git show "$CORE_RECIPE:.github/workflows/b50-ios-ipa.yml" > "$RUNNER_TEMP/b50.yaml"
+          ruby -ryaml -e 'print YAML.load_file(ARGV[0]).fetch("jobs").fetch("build").fetch("steps").find { |s| s["name"] == "Verify pinned sources and try exact three-way merge" }.fetch("run")' "$RUNNER_TEMP/b50.yaml" > "$RUNNER_TEMP/prepare-b50.sh"
+          bash "$RUNNER_TEMP/prepare-b50.sh"
+          test "$(git write-tree)" = "$CORE_TREE"
+          git -c user.name=ci -c user.email=ci@localhost commit -qm 'reproduce released b50 tree'
+          git tag -f v1.14.4-lx.37-b50-lx37
+          git submodule update --init --recursive submodules/utls submodules/wireguard-go submodules/sing-tun submodules/gvisor
+          .github/patch_go_for_ios.sh
+          make lib_install
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          go run ./cmd/internal/build_libbox -target apple -platform ios/arm64,iossimulator/arm64
+          test -s Libbox.xcframework/ios-arm64/Libbox.framework/Libbox
+      - name: Cache exact b50 framework
+        if: steps.framework.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: Libbox.xcframework
+          key: b51-libbox-b50-a078a680-go12610-xcode27-v1
+      - if: env.APPLE_SHA != ''
+        uses: actions/checkout@v5
+        with:
+          repository: eliassmail-dotcom/sing-box-for-apple
+          ref: ${{ env.APPLE_SHA }}
+          submodules: recursive
+          path: apple-b51
+          persist-credentials: false
+      - name: Test, archive and inspect the b51 IPA
+        if: env.APPLE_SHA != ''
+        working-directory: apple-b51
+        run: |
+          test "$(git rev-parse HEAD)" = "$APPLE_SHA"
+          mv ../Libbox.xcframework .
+          bash scripts/build_b51_ios.sh
+      - name: Upload test results
+        if: always() && env.APPLE_SHA != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: b51-xctest
+          path: |
+            apple-b51/build/B51.xcresult
+            apple-b51/build/XCTestSummary.json
+            apple-b51/build/signing-preflight.json
+          retention-days: 3
+          if-no-files-found: warn
+      - name: Stage accepted IPA
+        if: success() && env.APPLE_SHA != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: b51-candidate
+          path: |
+            apple-b51/build/SFI-b51-LX37-unsigned.ipa
+            apple-b51/build/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+  publish:
+    needs: build
+    if: needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - if: env.APPLE_SHA != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: b51-candidate
+      - name: Publish verified candidate
+        if: env.APPLE_SHA != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum -c SHA256SUMS
+          tag="candidate-ios-b51-run-${GITHUB_RUN_ID}"
+          gh release create "$tag" SFI-b51-LX37-unsigned.ipa SHA256SUMS --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "SFI 1.14.9 b51 (LX.37)" --notes "Unsigned device candidate. Client $APPLE_SHA. Core tree $CORE_TREE. Physical iPhone acceptance pending."
