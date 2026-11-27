@@ -1,0 +1,63 @@
+name: b50 LX.37 source merge preflight
+run-name: "LX b50 | LX.36 → LX.37 | source preflight (no build)"
+
+on:
+  push:
+    branches: [build/b50-lx37-migration]
+    paths: [".github/workflows/b50-lx37-preflight.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: b50-lx37-preflight-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify pinned sources and try exact three-way merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=6cbf8682938577d08f35defb3b11b447fafaa831
+          OLD=b5db574026d89c70136cb488a755da6398d6cfc8
+          NEW=92041d1a1bed6633a153a63d37ccc954f66c2d61
+          git merge-base --is-ancestor "$BASE" HEAD
+          git diff --exit-code "$BASE" HEAD -- . ':(exclude).github/workflows/b50-lx37-preflight.yml'
+          test -z "$(git status --porcelain)"
+          git fetch --no-tags https://github.com/Leadaxe/sing-box-lx.git \
+            refs/tags/v1.14.4-lx.36:refs/lx/upstream36 \
+            refs/tags/v1.14.4-lx.37:refs/lx/upstream37
+          test "$(git rev-parse 'refs/lx/upstream36^{commit}')" = "$OLD"
+          test "$(git rev-parse 'refs/lx/upstream37^{commit}')" = "$NEW"
+          git merge-base --is-ancestor "$OLD" "$NEW"
+          git diff --binary --full-index "$OLD" "$NEW" -- . ':(exclude).github/workflows/**' > "$RUNNER_TEMP/lx37.patch"
+          test -s "$RUNNER_TEMP/lx37.patch"
+          set +e
+          git apply --3way --index "$RUNNER_TEMP/lx37.patch"
+          result=$?
+          set -e
+          echo "### Source migration preflight" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Baseline: %s\nUpstream: %s → %s\nApply exit: %s\n' "$BASE" "$OLD" "$NEW" "$result" | tee -a "$GITHUB_STEP_SUMMARY"
+          git status --short
+          echo "Unmerged paths:"
+          git diff --name-only --diff-filter=U | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "Conflict context:"
+          git diff --cc --no-ext-diff
+          if [ "$result" -ne 0 ] || [ -n "$(git ls-files -u)" ]; then
+            echo "::error::Source integration not yet resolved. No candidate built or published."
+            exit 1
+          fi
+          git diff --cached --check
+          git diff --cached --stat
+          echo "Exact source patch applied cleanly; no compile, build, push or release performed." >> "$GITHUB_STEP_SUMMARY"
