@@ -12,6 +12,7 @@ git -C "$apple" checkout --detach "$apple_sha"
 test "$(git -C "$apple" rev-parse HEAD)" = "$apple_sha"
 swiftc "$apple/Library/Network/LXGeminiBuilder.swift" \
   "$apple/Library/Network/LXProfileOverrides.swift" \
+  "$apple/Library/Network/GroupPresentationSettings.swift" \
   migration/b50/ExportProfiles.swift -o "$dir/export-profiles"
 "$dir/export-profiles" "$dir/profiles"
 # Linux uses the supported LLVM linker; Darwin uses its normal linker.
