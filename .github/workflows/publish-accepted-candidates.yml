@@ -1,8 +1,8 @@
 name: Publish accepted iOS and Windows candidates
 on:
   workflow_run:
-    workflows: ['SFI unified FinalMask + signing/startup IPA', 'Windows integration acceptance']
-    branches: [build/finalmask-experimental-ipa, integration/windows-b46-finalmask]
+    workflows: ['SFI unified FinalMask + signing/startup IPA', 'Windows integration acceptance', 'SFI b50 LX.37 reviewed IPA']
+    branches: [build/finalmask-experimental-ipa, integration/windows-b46-finalmask, build/b50-lx37-migration]
     types: [completed]
   push:
     branches: [mlkem-v1.14.4]
@@ -44,6 +44,69 @@ jobs:
           attempt=$(jq -r .run_attempt <<< "$meta")
           if [[ "$branch" == build/finalmask-experimental-ipa && "$path" == .github/workflows/build-finalmask-experimental-ipa.yml ]]; then
             pattern='^SFI-lxpp-v[0-9.]+-b[0-9]+-[A-Za-z0-9._-]+-XCTEST-PASSED-unsigned-ipa$'
+            platform=ios
+          elif [[ "$branch" == build/b50-lx37-migration && "$path" == .github/workflows/b50-ios-ipa.yml ]]; then
+            # This new build is accepted only at the explicitly reviewed delivery workflow SHA.
+            test "$sha" = 30f1aa2555746b39e9389c8734084ac87ff8f649
+            pattern='^SFI-lxpp-v1\.14\.9-b50-lx37-XCTEST-PASSED-unsigned-ipa && "$path" == .github/workflows/windows-integration-acceptance.yml ]]; then
+            pattern='^windows-b[0-9]+-[A-Za-z0-9._-]+-candidate$'
+            platform=windows
+          else
+            echo "Run does not belong to the accepted delivery workflows."
+            exit 1
+          fi
+          matches=$(gh api "repos/$GH_REPO/actions/runs/$RUN_ID/artifacts?per_page=100" | jq --arg pattern "$pattern" '[.artifacts[] | select(.expired == false and (.name | test($pattern)))]')
+          test "$(jq length <<< "$matches")" -eq 1
+          artifact=$(jq -r '.[0].id' <<< "$matches")
+          name=$(jq -r '.[0].name' <<< "$matches")
+          if [[ "$platform" == ios ]]; then
+            [[ "$name" =~ -b([0-9]+)- ]]
+            label="ios-b${BASH_REMATCH[1]}"
+          else
+            label="${name%-candidate}"
+          fi
+          tag="candidate-$label-run-$RUN_ID"
+          if [[ "$attempt" != 1 ]]; then tag="$tag-attempt-$attempt"; fi
+          mkdir -p "$RUNNER_TEMP/candidate/local" "$RUNNER_TEMP/candidate/verify"
+          cd "$RUNNER_TEMP/candidate/local"
+          gh api "repos/$GH_REPO/actions/artifacts/$artifact/zip" > "$name.zip"
+          unzip -tq "$name.zip"
+          if [[ "$platform" == ios ]]; then
+            mapfile -t ipas < <(unzip -Z1 "$name.zip" | grep -E '\.ipa$')
+            test "${#ipas[@]}" = 1
+            unzip -p "$name.zip" "${ipas[0]}" > "$(basename "${ipas[0]}")"
+          fi
+          sha256sum -- * > SHA256SUMS
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "$label — accepted CI candidate" \
+              --notes "Successful run $RUN_ID (attempt $attempt); source commit $sha; branch $branch; original artifact $artifact. Archive tag identifies the publisher commit, not the source. Field acceptance may still be pending." ./*
+          fi
+          gh release download "$tag" --dir ../verify
+          (cd ../verify && sha256sum -c SHA256SUMS)
+          cmp SHA256SUMS ../verify/SHA256SUMS
+          gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$artifact"
+          echo "Published and verified $tag; removed duplicate artifact $artifact." >> "$GITHUB_STEP_SUMMARY"
+  verify_existing_releases:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Verify the migrated release assets using the same download and checksum gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          for tag in candidate-ios-b48-run-45945215492 candidate-windows-b46-finalmask-run-45963235790; do
+            dest="$RUNNER_TEMP/$tag"
+            mkdir -p "$dest"
+            gh release download "$tag" --dir "$dest"
+            (cd "$dest" && sha256sum -c SHA256SUMS)
+            echo "$tag verification succeeded." >> "$GITHUB_STEP_SUMMARY"
+          done
+
             platform=ios
           elif [[ "$branch" == integration/windows-b46-finalmask && "$path" == .github/workflows/windows-integration-acceptance.yml ]]; then
             pattern='^windows-b[0-9]+-[A-Za-z0-9._-]+-candidate$'
