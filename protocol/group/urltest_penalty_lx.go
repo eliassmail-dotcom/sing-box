@@ -89,10 +89,8 @@ func isPathDeadDialError(err error, siteOnOpen bool) bool {
 	if rrActiveRefusal(err) {
 		return !siteOnOpen
 	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return true
-	}
+	// net.Error timeouts are already classified by rrSilence (peer review #5,
+	// b50 Windows): it walks the same errors.As before the text fallback.
 	return false
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/sagernet/sing-box/common/interrupt"
 	"github.com/sagernet/sing-box/common/urltest"
 	C "github.com/sagernet/sing-box/constant"
+	tun "github.com/sagernet/sing-tun"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
@@ -95,10 +96,24 @@ func TestIsPathDeadDialError(t *testing.T) {
 		{"ctx deadline (SPEC 052)", context.DeadlineExceeded, true, true},
 		{"wrapped ctx deadline", E.Cause(context.DeadlineExceeded, "dial"), true, true},
 		{"os deadline", &net.OpError{Op: "connect", Err: syscall.ETIMEDOUT}, true, true},
+		{"net error timeout (inside rrSilence)", &net.OpError{Op: "connect", Err: context.DeadlineExceeded}, true, true},
 		{"host unreachable", syscall.EHOSTUNREACH, true, true},
+		{"net down (rr local class)", syscall.ENETDOWN, true, true},
+		{"host down (rr local class)", syscall.EHOSTDOWN, true, true},
+		{"address not available (rr local class)", syscall.EADDRNOTAVAIL, true, true},
+		{"gVisor no route (rr local class)", tun.ErrNoRoute, true, true},
+		{"gVisor network unreachable text", E.New("network is unreachable"), true, true},
+		{"WSAEHOSTUNREACH 10065", syscall.Errno(10065), true, true},
+		{"WSAENETUNREACH 10051", syscall.Errno(10051), true, true},
+		{"WSAETIMEDOUT 10060", syscall.Errno(10060), true, true},
 		{"refused", syscall.ECONNREFUSED, true, false},
 		{"wrapped refused", E.Cause(&net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}, "dial server"), true, false},
+		{"WSAECONNREFUSED 10061 (real Winsock refused)", syscall.Errno(10061), true, false},
+		{"wrapped WSAECONNREFUSED", E.Cause(&net.OpError{Op: "dial", Err: syscall.Errno(10061)}, "dial server"), true, false},
+		{"gVisor refused text", E.New("connection was refused"), true, false},
 		{"reset on open", syscall.ECONNRESET, true, false},
+		{"WSAECONNRESET 10054 (real Winsock reset)", syscall.Errno(10054), true, false},
+		{"gVisor reset text", E.New("connection reset by peer"), true, false},
 		{"canceled (caller)", context.Canceled, false, false},
 		{"plain error", E.New("dead node"), false, false},
 		{"nil", nil, false, false},
