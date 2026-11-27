@@ -129,15 +129,24 @@ jobs:
           with open(os.environ["GITHUB_ENV"], "a") as out:
               out.write(line + "\n")
           PY
+      - name: Configure LLVM linker for pinned Cronet archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          clang --version
+          ld.lld --version
+          echo "CC=clang" >> "$GITHUB_ENV"
+          echo "CXX=clang++" >> "$GITHUB_ENV"
+          echo "CGO_LDFLAGS=-fuse-ld=lld" >> "$GITHUB_ENV"
       - name: Compile Linux full-feature source (not an iOS build)
         shell: bash
         run: |
           set -euo pipefail
-          go build -ldflags '-checklinkname=0' -tags "$APPLE_TAGS" ./...
+          go build -ldflags '-checklinkname=0 -extldflags=-fuse-ld=lld' -tags "$APPLE_TAGS" ./...
       - name: Vet and race targeted integration
         shell: bash
         run: |
           set -euo pipefail
           tags="$APPLE_TAGS"
           go vet -tags "$tags" ./common/dialer/... ./common/tls/... ./protocol/group/... ./protocol/chain/... ./protocol/vless/... ./route/... ./experimental/libbox/
-          go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' -tags "$tags" ./common/dialer/ ./common/tls/... ./protocol/group/... ./protocol/chain/... ./protocol/vless/ ./option/ ./route/ ./experimental/libbox/
+          go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0 -extldflags=-fuse-ld=lld' -tags "$tags" ./common/dialer/ ./common/tls/... ./protocol/group/... ./protocol/chain/... ./protocol/vless/ ./option/ ./route/ ./experimental/libbox/
