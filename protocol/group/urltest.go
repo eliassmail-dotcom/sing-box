@@ -104,8 +104,8 @@ func NewURLTest(ctx context.Context, router adapter.Router, logger log.ContextLo
 			return nil, E.New("urltest: duplicate URLTest endpoint: ", endpoint)
 		}
 	}
-	if (len(options.PriorityOutbounds) > 0 || len(options.SecondaryPriorityOutbounds) > 0) && (failover || balancer != nil) {
-		return nil, E.New("urltest: priority_outbounds is only valid with least_test mode")
+	if (len(options.PriorityOutbounds) > 0 || len(options.SecondaryPriorityOutbounds) > 0) && balancer != nil {
+		return nil, E.New("urltest: priority_outbounds is not valid with round_robin mode")
 	}
 	primary := make(map[string]bool, len(options.PriorityOutbounds))
 	for _, preferred := range options.PriorityOutbounds {
@@ -491,6 +491,7 @@ type URLTestGroup struct {
 	passiveGuard                 *lxPassiveGuard        // LX: opt-in diagnostics
 	lastTickRunEnd               atomic.Int64           // lx: SPEC 125 — end of the last non-forced probe run, UnixNano
 	failoverSlow                 atomic.Pointer[tagSet] // lx: SPEC 126 — confirmed-slow held tags during a failover reselect
+	priorityRecovery             sync.Map                  // LX: consecutive healthy probes before returning to a preferred outbound
 	reachability                 adapter.ReachabilityReporter
 	// lx: SPEC 054 — penalty failover (least_test): tag → счётчик отказов «путь
 	// мёртв»; сброс только доказательством жизни (успешный дайл / ответ на пробу).
@@ -599,6 +600,9 @@ func (g *URLTestGroup) Close() error {
 
 func (g *URLTestGroup) Select(network string) (adapter.Outbound, bool) {
 	if len(g.priorityOutbounds) > 0 {
+		if g.failover {
+			return g.selectOrderedFallback(network)
+		}
 		return g.selectPriority(network)
 	}
 	var minDelay uint16
