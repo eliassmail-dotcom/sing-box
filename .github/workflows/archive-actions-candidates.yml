@@ -44,9 +44,9 @@ jobs:
             fi
             sha256sum -- * > SHA256SUMS
             if ! gh release view "$tag" >/dev/null 2>&1; then
-              gh release create "$tag" --target "$sha" --prerelease --latest=false \
+              gh release create "$tag" --target "$GITHUB_SHA" --prerelease --latest=false \
                 --title "$label — CI candidate archive" \
-                --notes "Archived from successful Actions run $run, source commit $sha. Candidate only; not a stable release. Original artifact ID $artifact." \
+                --notes "Archived from successful Actions run $run, source commit $sha. Archive tag points to the maintenance workflow commit, not the original source. Candidate only; not a stable release. Original artifact ID $artifact." \
                 ./*
             fi
             gh release download "$tag" --dir ../verify
