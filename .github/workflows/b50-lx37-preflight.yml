@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: b50-lx37-preflight-${{ github.ref }}
+  group: b50-lx37-rr-preflight-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -78,6 +78,21 @@ jobs:
             cmp "$p" <(git show "$GITHUB_SHA:migration/b50/resolved/$p.txt" | gofmt)
             git add -- "$p"
           done
+          # RR multi-URL overlays: exact clean LX.37 blobs, not conflict resolutions.
+          for p in protocol/group/urltest_rr_queue_lx.go protocol/group/urltest_rr_heal_lx.go protocol/group/urltest_rr_track_lx.go; do
+            test "$(git rev-parse ":$p")" = "$(git rev-parse "$NEW:$p")"
+            git show "$GITHUB_SHA:migration/b50/resolved/$p.txt" > "$p"
+            cmp "$p" <(git show "$GITHUB_SHA:migration/b50/resolved/$p.txt")
+            gofmt -w "$p"
+            cmp "$p" <(git show "$GITHUB_SHA:migration/b50/resolved/$p.txt" | gofmt)
+            git add -- "$p"
+          done
+          p=protocol/group/urltest_rr_multi_b50_test.go
+          test ! -e "$p"
+          git show "$GITHUB_SHA:migration/b50/resolved/$p.txt" > "$p"
+          gofmt -w "$p"
+          cmp "$p" <(git show "$GITHUB_SHA:migration/b50/resolved/$p.txt" | gofmt)
+          git add -- "$p"
           echo "### Source migration preflight" >> "$GITHUB_STEP_SUMMARY"
           printf 'Baseline: %s\nUpstream: %s → %s\nApply exit: %s\n' "$BASE" "$OLD" "$NEW" "$result" | tee -a "$GITHUB_STEP_SUMMARY"
           git status --short
@@ -148,6 +163,11 @@ jobs:
         run: |
           set -euo pipefail
           go build -ldflags '-checklinkname=0 -extldflags=-fuse-ld=lld' -tags "$APPLE_TAGS" ./...
+      - name: RR multi-URL focused race gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -count=1 -timeout=3m -ldflags '-checklinkname=0 -extldflags=-fuse-ld=lld' -tags "$APPLE_TAGS" ./protocol/group/ -run '^TestB50RRMulti' -v
       - name: Vet and race targeted integration
         shell: bash
         run: |
