@@ -47,7 +47,6 @@ import (
 	"context"
 	"errors"
 	"net"
-	"os"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -77,13 +76,17 @@ func isPathDeadDialError(err error, siteOnOpen bool) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false
 	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded) {
+	// lx C5 (b50 Windows): the plain syscall errno checks never match the real
+	// Winsock codes (WSAEHOSTUNREACH 10065, WSAENETUNREACH 10051, WSAETIMEDOUT
+	// 10060, WSAECONNREFUSED 10061, WSAECONNRESET 10054). Reuse the RR errno
+	// tables of this package (urltest_rr_errors_lx.go), which already classify
+	// both the Unix errnos and the Winsock codes (and gVisor texts), instead of
+	// duplicating the mapping. Unix behaviour is unchanged: every errno of the
+	// former checks is contained in the rr tables.
+	if rrSilence(err) || errors.Is(err, syscall.ETIMEDOUT) || rrLocalError(err) {
 		return true
 	}
-	if errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.ETIMEDOUT) {
-		return true
-	}
-	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) {
+	if rrActiveRefusal(err) {
 		return !siteOnOpen
 	}
 	var netErr net.Error
