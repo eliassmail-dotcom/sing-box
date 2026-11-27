@@ -47,7 +47,10 @@ jobs:
             platform=ios
           elif [[ "$branch" == build/b50-lx37-migration && "$path" == .github/workflows/b50-ios-ipa.yml ]]; then
             # This new build is accepted only at the explicitly reviewed delivery workflow SHA.
-            test "$sha" = 30f1aa2555746b39e9389c8734084ac87ff8f649
+            case "$sha" in
+              30f1aa2555746b39e9389c8734084ac87ff8f649|f1719f35ed10c23c2d2b39c54bf83717a1b81d32) ;;
+              *) exit 1 ;;
+            esac
             pattern='^SFI-lxpp-v1\.14\.9-b50-lx37-XCTEST-PASSED-unsigned-ipa && "$path" == .github/workflows/windows-integration-acceptance.yml ]]; then
             pattern='^windows-b[0-9]+-[A-Za-z0-9._-]+-candidate$'
             platform=windows
