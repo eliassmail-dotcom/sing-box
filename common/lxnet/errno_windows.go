@@ -28,4 +28,11 @@ func IsConnReset(err error) bool {
 	return errors.Is(err, syscall.ECONNRESET) || errors.Is(err, windows.WSAECONNRESET)
 }
 
+// IsTruncatedDatagramRead reports the Winsock error returned by a UDP read
+// when the datagram exceeds the receive buffer. The excess is discarded by
+// Winsock; callers must discard the entire datagram, not decode its prefix.
+func IsTruncatedDatagramRead(err error) bool {
+	return errors.Is(err, windows.WSAEMSGSIZE)
+}
+
 // lx:end adaptive-warmup
