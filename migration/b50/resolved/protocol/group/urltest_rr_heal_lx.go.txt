@@ -764,8 +764,8 @@ func rrProbeTimeout() time.Duration {
 // rrProbeNode produces one logical verdict. Every endpoint owns one previously
 // reserved physical place until its URLTest call actually returns, including
 // losers that are still unwinding after first success or cancellation.
-func (g *URLTestGroup) rrProbeNode(ctx context.Context, member adapter.Outbound, links []string, release func(int)) (result rrProbe) {
-	result = rrProbe{member: member.Tag(), leaf: RealTag(member, N.NetworkTCP), started: time.Now()}
+func (g *URLTestGroup) rrProbeNode(ctx context.Context, member adapter.Outbound, leafTag string, links []string, release func(int)) (result rrProbe) {
+	result = rrProbe{member: member.Tag(), leaf: leafTag, started: time.Now()}
 	defer func() {
 		result.ended = time.Now()
 		if g.balancer != nil {
