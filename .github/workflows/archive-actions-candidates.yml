@@ -1,0 +1,71 @@
+name: Archive verified Actions candidates
+on:
+  push:
+    branches: [maintenance/actions-storage-20261127]
+    paths: ['.github/workflows/archive-actions-candidates.yml']
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: archive-actions-candidates-20261127
+  cancel-in-progress: false
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Archive exact successful candidate artifacts and verify downloaded releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/archive"
+          cd "$RUNNER_TEMP/archive"
+          while read -r run artifact label; do
+            meta=$(gh api "repos/$GH_REPO/actions/runs/$run")
+            test "$(jq -r .conclusion <<< "$meta")" = success
+            sha=$(jq -r .head_sha <<< "$meta")
+            tag="candidate-$label-run-$run"
+            mkdir -p "$tag/local" "$tag/verify"
+            cd "$tag/local"
+            artifact_meta=$(gh api "repos/$GH_REPO/actions/artifacts/$artifact")
+            test "$(jq -r .workflow_run.id <<< "$artifact_meta")" = "$run"
+            test "$(jq -r .expired <<< "$artifact_meta")" = false
+            name=$(jq -r .name <<< "$artifact_meta")
+            gh api "repos/$GH_REPO/actions/artifacts/$artifact/zip" > "$name.zip"
+            unzip -tq "$name.zip"
+            # Keep the original archive and expose its IPA directly for sideloading.
+            if [[ "$label" == ios-* ]]; then
+              mapfile -t ipas < <(unzip -Z1 "$name.zip" | grep -E '\.ipa$')
+              test "${#ipas[@]}" = 1
+              unzip -p "$name.zip" "${ipas[0]}" > "$(basename "${ipas[0]}")"
+            fi
+            sha256sum -- * > SHA256SUMS
+            if ! gh release view "$tag" >/dev/null 2>&1; then
+              gh release create "$tag" --target "$sha" --prerelease --latest=false \
+                --title "$label — CI candidate archive" \
+                --notes "Archived from successful Actions run $run, source commit $sha. Candidate only; not a stable release. Original artifact ID $artifact." \
+                ./*
+            fi
+            gh release download "$tag" --dir ../verify
+            (cd ../verify && sha256sum -c SHA256SUMS)
+            cmp SHA256SUMS ../verify/SHA256SUMS
+            echo "$label: verified $tag" >> "$GITHUB_STEP_SUMMARY"
+            cd ../..
+          done <<'ROWS'
+          45892350813 15154580043 ios-b44
+          45893437055 15153652564 ios-b45
+          45893766964 15153633711 ios-b46
+          45945215492 15176127611 ios-b48
+          45963235790 15182007757 windows-b46-finalmask
+          ROWS
+      - name: Remove only successfully archived duplicate candidate artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          for artifact in 15154580043 15153652564 15153633711 15176127611 15182007757; do
+            gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$artifact"
+            echo "Removed archived duplicate Actions artifact $artifact" >> "$GITHUB_STEP_SUMMARY"
+          done
