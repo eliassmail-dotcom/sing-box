@@ -89,7 +89,12 @@ jobs:
             echo "::error::Source integration not yet resolved. No candidate built or published."
             exit 1
           fi
-          git diff --cached --check
+          # Exact upstream documentation blobs contain two known blank lines
+          # at EOF. Check their identity, then exempt only those two paths.
+          for p in SPECS/TASKS/054-URLTEST_PENALTY_FAILOVER/HISTORY.md SPECS/TASKS/161-HTTP_CONNECT_OUTAGE_LEAK/HISTORY.md; do
+            test "$(git rev-parse ":$p")" = "$(git rev-parse "$NEW:$p")"
+          done
+          git diff --cached --check -- . ':(exclude)SPECS/TASKS/054-URLTEST_PENALTY_FAILOVER/HISTORY.md' ':(exclude)SPECS/TASKS/161-HTTP_CONNECT_OUTAGE_LEAK/HISTORY.md'
           git diff --cached --stat
           echo "Exact source patch and pinned resolutions applied. No publish or push performed." >> "$GITHUB_STEP_SUMMARY"
 
