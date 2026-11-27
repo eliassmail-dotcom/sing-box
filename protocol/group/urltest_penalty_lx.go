@@ -148,6 +148,30 @@ func (g *URLTestGroup) penaltyEmergency(network string) bool {
 // penaltyBest — двухуровневое ранжирование (штрафы ↑, задержка ↑) среди узлов
 // с history, минус исключённый тег. nil, если кандидатов нет.
 func (g *URLTestGroup) penaltyBest(network string, excludeTag string) adapter.Outbound {
+	if len(g.priorityOutbounds) > 0 && g.failover {
+		// Ordered failover never races healthy reserves by RTT. Skip only nodes
+		// with repeated dial failures; if every candidate is penalized, use the
+		// least-penalized one, preserving configured order for ties.
+		var leastBad adapter.Outbound
+		var leastPenalty int64
+		for _, detour := range g.orderedFailoverNodes(network) {
+			tag := RealTag(detour, N.NetworkTCP)
+			if tag == excludeTag || tag == "" || !g.guardAllows(tag) {
+				continue
+			}
+			if g.history.LoadURLTestHistory(tag) == nil {
+				continue
+			}
+			penalty := g.penaltyOf(tag)
+			if penalty < penaltyThreshold {
+				return detour
+			}
+			if leastBad == nil || penalty < leastPenalty {
+				leastBad, leastPenalty = detour, penalty
+			}
+		}
+		return leastBad
+	}
 	if len(g.priorityOutbounds) > 0 {
 		// A successful fallback dial may not bypass another responsive primary.
 		for _, preferred := range []int{0, 1, 2} {
@@ -229,6 +253,10 @@ func (g *URLTestGroup) pickForDial(ctx context.Context, network string) adapter.
 
 func (g *URLTestGroup) pickForDialNode(network string) adapter.Outbound {
 	if len(g.priorityOutbounds) > 0 {
+		if g.failover {
+			preferred, _ := g.failoverSelect(network, false)
+			return preferred
+		}
 		preferred, _ := g.selectPriority(network)
 		return preferred
 	}
