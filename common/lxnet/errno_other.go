@@ -23,4 +23,11 @@ func IsConnReset(err error) bool {
 	return errors.Is(err, syscall.ECONNRESET)
 }
 
+// IsTruncatedDatagramRead is false on non-Windows platforms: ordinary UDP
+// Read reports a truncated length without this Winsock-specific error.
+// Preserve all other read errors.
+func IsTruncatedDatagramRead(err error) bool {
+	return false
+}
+
 // lx:end adaptive-warmup

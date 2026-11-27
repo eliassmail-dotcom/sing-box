@@ -11,6 +11,8 @@ import (
 	"io"
 	"net"
 	"sync"
+
+	"github.com/sagernet/sing-box/common/lxnet"
 )
 
 const (
@@ -51,6 +53,9 @@ func(c *udpConn)Read(p []byte)(int,error){
 	defer c.readMu.Unlock()
 	for{
 		n,err:=c.Conn.Read(c.readBuf[:])
+		// Windows reports WSAEMSGSIZE rather than a successful truncated
+		// read. Discard the entire oversized datagram on either platform.
+		if lxnet.IsTruncatedDatagramRead(err){continue}
 		if err!=nil{return 0,err}
 		if n>udpEncodedLimit{continue}
 		idx:=0
