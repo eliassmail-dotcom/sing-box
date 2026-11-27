@@ -5,7 +5,7 @@ Base peer review #3 packet commit: 4eb4646cab28fd7738346a881e5dfc2b0418de71.
 Compare: https://github.com/eliassmail-dotcom/sing-box/compare/4eb4646cab28fd7738346a881e5dfc2b0418de71...92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536
 Gate: https://github.com/eliassmail-dotcom/sing-box/actions/runs/46003950620 (do not infer PASS until completed).
 Upstream trace timing defect: https://github.com/Leadaxe/sing-box-lx/issues/89; no trace source or tests changed.
-Original XHTTP rerun: https://github.com/eliassmail-dotcom/sing-box/actions/runs/45991844330 — vet/race step PASS, XHTTP 4.077s; old Swift harness failed as expected on the old immutable SHA. Diagnostic candidate: run 46004240386, 20 isolated repetitions + 3 package repetitions PASS; pure upstream tag derivation corrected in 271f704b38ea385ac8ddfdc9ea93c741b8d6e08b, new comparison run 46004383444.
+Original XHTTP rerun: https://github.com/eliassmail-dotcom/sing-box/actions/runs/45991844330 — vet/race step PASS, XHTTP 4.077s; old Swift harness failed as expected on the old immutable SHA. Diagnostic candidate: run 46004240386, 20 isolated repetitions + 3 package repetitions PASS; pure upstream tag derivation corrected in 271f704b38ea385ac8ddfdc9ea93c741b8d6e08b, new comparison run 46004383444: both pure LX.37 and candidate completed SUCCESS (20 isolated repetitions plus 3 full package repetitions, all under race). Initial hang not reproduced.
 
 ## Review scope
 
@@ -16,7 +16,7 @@ Compare each new full-source overlay under migration/b50/resolved/protocol/group
 3. Stable ordered endpoint list JSON encoding replaces the former single link identity (field name retained for compatibility with existing unit fixtures). The exact leaf used for the flight is resolved once and passed to the probe; dedup only identical lists and leaf. Verify stale-flight lower-bound behavior, decisive alone exception, and nested leaf attribution.
 4. Use existing probeURLs for first-success/all-fail; one rrProbe and one logical outcome per caller; cancellation from queue wait is not a miss. Verify no change to node-level probeAnswered/poll counters and dead-strike rules.
 5. Freeze cancels rounds as upstream, and explicitly cancels waiting/active life contexts. Launch callbacks after cancellation release instead of starting; late miss records require valid epoch. Verify grant/freeze races, lock order, no new work during freeze.
-6. Six focused tests cover endpoint identity, any-success/all-fail, round cap/freeze, concurrent identical vs reordered flight, queue cancellation/life freeze, physical reservations during delayed cancellation. Existing full RR suite must pass under race.
+6. The focused RR race step of 46003950620 passed. Six focused tests cover endpoint identity, any-success/all-fail, round cap/freeze, concurrent identical vs reordered flight, queue cancellation/life freeze, physical reservations during delayed cancellation. Existing full RR suite must pass under race.
 7. Swift harness compiles real pinned Apple profile, presentation and outbound models. On Linux a declarations-only Libbox bridge traps if any UI method is invoked; actual generated JSON is checked by native merged CLI (parser/Box.New). No behavior of the core is mocked. Verify the generated/rejected profile checks, and flag any gap.
 
 ## Verdict requested
