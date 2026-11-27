@@ -1,0 +1,113 @@
+name: Windows integration acceptance
+run-name: Windows b46 + extended FinalMask integration candidate
+on:
+  push:
+    branches: [integration/windows-b46-finalmask]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-integration-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 100
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Enable long paths
+        run: git config --global core.longpaths true
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.10'
+          cache: false
+      - name: Initialize pinned core dependencies
+        run: |
+          set -euo pipefail
+          git submodule update --init --recursive submodules/wireguard-go submodules/sing-tun submodules/gvisor submodules/utls
+          for dep in wireguard-go sing-tun gvisor utls; do
+            test "$(git -C "submodules/$dep" rev-parse HEAD)" = "$(git rev-parse "HEAD:submodules/$dep")"
+            test -z "$(git -C "submodules/$dep" status --porcelain)"
+          done
+          test -z "$(git status --porcelain --ignore-submodules=none)"
+          git merge-base --is-ancestor 6c7a2bdc0dc558ee73d37f467d052f5e77ac62fc HEAD
+          git merge-base --is-ancestor 5f9ded13335d27612b337d0444c78bdc83b0d69d HEAD
+          git merge-base --is-ancestor 21e05c75c746aad5e32dde763a4f94aa10ff39d4 HEAD
+      - name: Set native Windows test tags and race compiler
+        run: |
+          set -euo pipefail
+          if ! command -v gcc >/dev/null 2>&1; then
+            for d in /c/mingw64/bin /c/msys64/mingw64/bin /c/msys64/ucrt64/bin; do
+              if test -x "$d/gcc.exe"; then export PATH="$d:$PATH"; echo "$(cygpath -w "$d")" >> "$GITHUB_PATH"; break; fi
+            done
+          fi
+          gcc --version
+          TAGS="$(tr -d '\r\n' < release/DEFAULT_BUILD_TAGS_WINDOWS),with_xhttp,with_awg,with_lx_command,with_lx_chain,with_trusttunnel,with_external_windivert,with_external_usbip_drivers"
+          echo "LX_TAGS=$TAGS" >> "$GITHUB_ENV"
+          echo "CGO_ENABLED=1" >> "$GITHUB_ENV"
+          mkdir -p dist
+      - name: Reliability and routing race suites
+        run: |
+          set -euo pipefail
+          go test -race -count=1 -timeout=20m -ldflags '-checklinkname=0' -tags "$LX_TAGS" ./common/dialer/ ./common/urltest/ ./common/tls/... ./common/lxnet/ ./common/lxtrace/ ./common/lxsniffguard/ ./common/lxdatagram/ ./option/ ./route/... ./dns/... ./protocol/group/... ./protocol/chain/ ./protocol/dns/ ./protocol/http/ 2>&1 | tee dist/reliability-tests.txt
+      - name: VLESS XHTTP and FinalMask race suites
+        run: |
+          set -euo pipefail
+          go test -race -count=1 -timeout=20m -ldflags '-checklinkname=0' -tags "$LX_TAGS" ./protocol/vless/ ./transport/v2rayquic/ ./transport/v2rayxhttp/ ./protocol/hysteria2/ ./protocol/tuic/ ./common/finalmask/... ./experimental/libbox/ 2>&1 | tee dist/transport-tests.txt
+          go test -count=1 -timeout=8m -ldflags '-checklinkname=0' -tags "$LX_TAGS" ./protocol/vless/encryption/ 2>&1 | tee dist/vision-tests.txt
+      - name: Explicit Windows and XHTTP acceptance gates
+        run: |
+          set -euo pipefail
+          go test -race -count=1 -timeout=8m -ldflags '-checklinkname=0' -tags "$LX_TAGS" -run 'Test(RefusedDialClassifiesAsConnRefused|ResetDialClassifiesAsConnReset|VLESSAdaptiveWarmupActivatesWithCoordinator|VLESSAdaptiveWarmupInactiveWithoutCoordinator|LXIPRaceRequiresActualREALITYAuthentication)' ./common/dialer/ ./protocol/vless/ ./common/tls/ 2>&1 | tee dist/windows-activation-tests.txt
+          go test -race -count=100 -timeout=20m -ldflags '-checklinkname=0' -tags "$LX_TAGS" -run '^(TestStreamUpRefusedUploadFailsWrite|TestTransportStage_LX)$' ./transport/v2rayxhttp/ 2>&1 | tee dist/xhttp-repeat-tests.txt
+          go test -race -count=1 -timeout=10m -ldflags '-checklinkname=0' -tags "$LX_TAGS,with_lx_idle_suspend" ./route/ 2>&1 | tee dist/mobile-reachability-tests.txt
+      - name: Build unsigned Windows daemon and driver assets
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          git tag "v1.14.4-lx.36-b46-windows-integration-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          go run ./cmd/internal/build_boxdd -target windows/amd64 -output dist/sing-box-daemon.exe
+          dist/sing-box-daemon.exe version | tee dist/version.txt
+          go version -m dist/sing-box-daemon.exe | tee dist/build-info.txt
+          test -s dist/sing-box-daemon.exe
+      - name: Manifest and artifact checksums
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = [ordered]@{
+            status = 'CI passed; experimental candidate; local field and interoperability acceptance pending'
+            commit = (git rev-parse HEAD)
+            tree = (git rev-parse 'HEAD^{tree}')
+            prepared_ios_core = '5f9ded13335d27612b337d0444c78bdc83b0d69d'
+            ios_workflow_run = '45893766964'
+            finalmask_source = '21e05c75c746aad5e32dde763a4f94aa10ff39d4'
+            windows_source = '6c7a2bdc0dc558ee73d37f467d052f5e77ac62fc'
+            upstream_lx36 = 'b5db574026d89c70136cb488a755da6398d6cfc8'
+            go = (go version)
+            tags = $env:LX_TAGS
+            submodules = (git submodule status submodules/wireguard-go submodules/sing-tun submodules/gvisor submodules/utls)
+            tests = 'PASS; see test logs; Vision package without race by existing acceptance policy'
+            signature = (Get-AuthenticodeSignature dist/sing-box-daemon.exe).Status.ToString()
+            files = @(Get-ChildItem dist -File | ForEach-Object { [ordered]@{ name = $_.Name; bytes = $_.Length; sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash } })
+          }
+          $manifest | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 dist/sing-box-daemon-manifest.json
+          Get-Content dist/sing-box-daemon-manifest.json
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-integration-test-evidence
+          path: dist/*.txt
+          if-no-files-found: ignore
+      - name: Upload accepted candidate (not a release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-b46-finalmask-candidate
+          path: dist/
+          if-no-files-found: error
