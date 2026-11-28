@@ -7,9 +7,9 @@ on:
 permissions:
   contents: read
 env:
-  CORE_SHA: 2909685cb3d1456cc946b1e38cf38c4b4905fab0
+  CORE_SHA: cc7339a891403bde3b4aa9bd508fc60983daeea3
   CORE_DELTA: 048ec0280668bf2c311bc36888862273c3da429c
-  CORE_VERSION: 1.14.6-lx.37-yc-b54
+  CORE_VERSION: 1.14.6-lx.37-yc-b54-mac1
   LAUNCHER_SHA256: 8cbb051337214c966f1f0e89bac8c6007c1639481acf357f2354154a12e614ac
 jobs:
   native:
@@ -19,6 +19,9 @@ jobs:
       GOTOOLCHAIN: local
       GOFLAGS: -mod=readonly
       MACOSX_DEPLOYMENT_TARGET: '13.0'
+      CGO_CFLAGS: -mmacosx-version-min=13.0
+      CGO_CXXFLAGS: -mmacosx-version-min=13.0
+      CGO_LDFLAGS: -mmacosx-version-min=13.0
     steps:
       - uses: actions/checkout@v5
         with:
@@ -28,7 +31,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 1.26.11
-          cache: false
+          cache: true
       - name: Verify pinned desktop source and dependency forks
         run: |
           set -euo pipefail
@@ -48,9 +51,6 @@ jobs:
           CGO_ENABLED: '1'
           GOOS: darwin
           GOARCH: amd64
-          CGO_CFLAGS: -mmacosx-version-min=13.0
-          CGO_CXXFLAGS: -mmacosx-version-min=13.0
-          CGO_LDFLAGS: -mmacosx-version-min=13.0
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -73,7 +73,7 @@ jobs:
           CGO_ENABLED: '1'
         run: |
           set -euo pipefail
-          go test -count=1 -timeout=10m -tags "$LX_TAGS" -ldflags '-checklinkname=0' ./lxd/ ./cmd/sing-box/
+          go test -trimpath -count=1 -timeout=10m -tags "$LX_TAGS" -ldflags '-checklinkname=0' ./lxd/ ./cmd/sing-box/
           printf '%s\n' '{"inbounds":[{"type":"tun","tag":"tun-in","address":["172.19.0.1/30"],"auto_route":false}],"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}' > "$RUNNER_TEMP/tun.json"
           printf '%s\n' '{"outbounds":[{"type":"naive","tag":"naive-out","server":"example.com","server_port":443,"username":"u","password":"p","tls":{"enabled":true}}]}' > "$RUNNER_TEMP/naive.json"
           ./dist/sing-box check -c "$RUNNER_TEMP/tun.json"
@@ -94,7 +94,9 @@ jobs:
           python3 - <<'PY'
           import re
           s=open('dist/launcher-macho-audit.txt').read()
-          v=re.findall(r'\b(?:minos|version)\s+(\d+(?:\.\d+)*)',s)
+          v=re.findall(r'\bminos\s+(\d+(?:\.\d+)*)',s)
+          if not v:
+              v=re.findall(r'LC_VERSION_MIN_MACOSX\s+cmdsize\s+\d+\s+version\s+(\d+(?:\.\d+)*)',s)
           assert v and all(tuple(map(int,x.split('.'))) <= (13,0,0) for x in v),s
           PY
       - name: Package native core and provenance
@@ -106,7 +108,10 @@ jobs:
           YC Native TUN Intel candidate — macOS Ventura 13+
           This contains the YC desktop core and the original Leadaxe launcher v2.4.5 archive.
           They are separate and the upstream app bundle is not modified.
-          Core source and SHA256 are included. No Apple Network Extension is used.
+          Core source revision and SHA256 are included. Corresponding sources:
+          https://github.com/eliassmail-dotcom/sing-box/tree/cc7339a891403bde3b4aa9bd508fc60983daeea3
+          https://github.com/Leadaxe/singbox-launcher/tree/v2.4.5
+           No Apple Network Extension is used.
           For a test launch, extract the app, and run its Contents/MacOS/singbox-launcher
           executable as your normal user with SINGBOX_LAUNCHER_CORE set to the absolute
           path of the extracted YC sing-box binary. Do not run the GUI as root.
