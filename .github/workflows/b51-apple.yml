@@ -9,7 +9,7 @@ permissions:
   contents: read
 env:
   # Filled only for a reviewed client checkout. An empty pin primes Libbox alone.
-  APPLE_SHA: 2f37b84ce5eb1f05306469f0f97663d5fa6f7b4f
+  APPLE_SHA: 80485a87211eeab40d6ca71ae99660382bbbdfaa
   CORE_TREE: a078a680649b5f33b3839c05a4e0f489781ffc87
   CORE_GATE: 92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536
   CORE_RECIPE: 50244466380951e8dedd1f8c892771a220e1ad91
@@ -84,6 +84,7 @@ jobs:
             apple-b51/build/B51.xcresult
             apple-b51/build/XCTestSummary.json
             apple-b51/build/signing-preflight.json
+            apple-b51/build/portable-preflight.json
           retention-days: 3
           if-no-files-found: warn
       - name: Stage accepted IPA
@@ -93,6 +94,8 @@ jobs:
           name: b51-candidate
           path: |
             apple-b51/build/SFI-b51-LX37-unsigned.ipa
+            apple-b51/build/SFI-b51-LX37-portable.ipa
+            apple-b51/build/b51-signing-tools.zip
             apple-b51/build/SHA256SUMS
           if-no-files-found: error
           retention-days: 1
@@ -115,4 +118,4 @@ jobs:
         run: |
           sha256sum -c SHA256SUMS
           tag="candidate-ios-b51-run-${GITHUB_RUN_ID}"
-          gh release create "$tag" SFI-b51-LX37-unsigned.ipa SHA256SUMS --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "SFI 1.14.9 b51 (LX.37)" --notes "Unsigned device candidate. Client $APPLE_SHA. Core tree $CORE_TREE. Physical iPhone acceptance pending."
+          gh release create "$tag" SFI-b51-LX37-unsigned.ipa SFI-b51-LX37-portable.ipa b51-signing-tools.zip SHA256SUMS --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "SFI 1.14.9 b51 (LX.37)" --notes "Unsigned device candidates from one archive. The unsigned variant retains the original b50 group declaration for upgrades. Bind the portable variant to the signer's designated group with the included Python tools before signing. Client $APPLE_SHA. Core tree $CORE_TREE. Physical iPhone acceptance pending."
