@@ -73,6 +73,9 @@ func (g *generator) Describe(valueType reflect.Type) (*Node, error) {
 		return describer.DescribeSchema(g)
 	}
 	switch valueType {
+	case reflect.TypeFor[stdjson.RawMessage]():
+		// RawMessage represents an arbitrary JSON value, not a byte array.
+		return &Node{}, nil
 	case durationType:
 		return g.Define("Duration", func() (*Node, error) {
 			return DurationNode(), nil
