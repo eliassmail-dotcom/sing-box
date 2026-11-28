@@ -31,6 +31,14 @@ the same daemon binary, and records the last-good profile with rollback on a
 failed startup. Build the YC external-profile path around that contract:
 - Preserve all route/DNS/endpoint/outbound/SRS/LX semantics. Do not reconstruct
   the JSON from URI nodes. Verify active_sha256 and report apply failures.
+- Preserve `experimental.clash_api.default_mode` and its `clash_mode`
+  routing/DNS dependencies (notably G-Smart). The launcher standard daemon
+  preparation strips Clash API and gates unsupported keys, so do not call
+  that transformation on YC profiles blindly. Keep the loopback API local,
+  provision a per-install random secret for the UI, and resolve controller
+  port conflicts without changing mode semantics. Resolve the cache_file
+  path into the daemon's protected state directory if needed. Record any
+  platform-only changes and hash the actual applied bytes.
 - Keep the input TUN tag (iphone-tun) unless all references are migrated.
   The tag is not an OS binding. Check auto_route, auto_detect_interface,
   and native macOS DNS handling. Reject iOS-only localdev mode for this target.
