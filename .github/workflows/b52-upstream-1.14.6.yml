@@ -1,0 +1,111 @@
+name: SFI b52 upstream 1.14.6 IPA
+on:
+  push:
+    branches: [build/b52-upstream-1.14.6]
+    paths: ['.github/workflows/b52-upstream-1.14.6.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+env:
+  APPLE_SHA: 630e899170b5d6aa53f0ebbbf717b2fd099dc26c
+  SYNC_SHA: 76d01a8bcb7ca253e252cf49c842feb708e79171
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: eliassmail-dotcom/sing-box-for-apple
+          ref: ${{ env.APPLE_SHA }}
+          submodules: recursive
+          path: apple
+          persist-credentials: false
+      - name: Retrieve accepted device and simulator framework
+        uses: actions/download-artifact@v4
+        with:
+          name: upstream-1.14.6-lx37-ios-libbox-candidate
+          run-id: 46122804695
+          github-token: ${{ github.token }}
+          path: framework
+      - name: Verify exact accepted core and prepare framework
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd framework
+          shasum -a 256 -c SHA256SUMS
+          test "$(cat upstream-sync-commit.txt)" = "$SYNC_SHA"
+          core_tree="$(cat ios-core-tree.txt)"
+          [[ "$core_tree" =~ ^[a-f0-9]{40}$ ]]
+          echo "CORE_TREE=$core_tree" >> "$GITHUB_ENV"
+          echo "Core tree: $core_tree" >> "$GITHUB_STEP_SUMMARY"
+          ditto -x -k Libbox.xcframework.zip ../apple/
+          test -s ../apple/Libbox.xcframework/ios-arm64/Libbox.framework/Libbox
+          test -s ../apple/Libbox.xcframework/ios-arm64-simulator/Libbox.framework/Libbox
+      - name: Prepare b52 from tested b51 client
+        working-directory: apple
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$APPLE_SHA"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('sing-box.xcodeproj/project.pbxproj')
+          s = p.read_text()
+          old = 'CURRENT_PROJECT_VERSION = 51;'
+          assert s.count(old) >= 10
+          p.write_text(s.replace(old, 'CURRENT_PROJECT_VERSION = 52;'))
+          p = Path('scripts/build_b51_ios.sh')
+          s = p.read_text()
+          assert s.count('build=51') == 1 and s.count('--build 51') == 2
+          s = s.replace('build=51', 'build=52').replace('--build 51', '--build 52')
+          s = s.replace('SFI-b51-LX37-', 'SFI-b52-1.14.6-LX37-')
+          s = s.replace('b51-signing-tools.zip', 'b52-signing-tools.zip')
+          assert s.count('coreVersion="LX.37"') == 1
+          s = s.replace('coreVersion="LX.37"', 'coreVersion="1.14.6-lx.37-yc-candidate", coreFrameworkRun=46122804695, upstreamSyncCommit=os.environ["SYNC_SHA"]')
+          Path('scripts/build_b52_ios.sh').write_text(s)
+          PY
+          bash -n scripts/build_b52_ios.sh
+      - name: Test archive and inspect b52 IPA
+        working-directory: apple
+        run: bash scripts/build_b52_ios.sh
+      - name: Upload XCTest evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b52-xctest
+          path: |
+            apple/build/B51.xcresult
+            apple/build/XCTestSummary.json
+            apple/build/signing-preflight.json
+            apple/build/portable-preflight.json
+          retention-days: 3
+          if-no-files-found: warn
+      - name: Upload verified IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: b52-upstream-1.14.6-candidate
+          path: |
+            apple/build/SFI-b52-1.14.6-LX37-unsigned.ipa
+            apple/build/SFI-b52-1.14.6-LX37-portable.ipa
+            apple/build/b52-signing-tools.zip
+            apple/build/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: b52-upstream-1.14.6-candidate
+      - name: Publish verified candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum -c SHA256SUMS
+          tag="candidate-ios-b52-upstream-1.14.6-run-${GITHUB_RUN_ID}"
+          gh release create "$tag" SFI-b52-1.14.6-LX37-unsigned.ipa SFI-b52-1.14.6-LX37-portable.ipa b52-signing-tools.zip SHA256SUMS --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "SFI 1.14.9 b52 (sing-box 1.14.6 + LX.37)" --notes "Verified b51 client $APPLE_SHA, new upstream 1.14.6 framework from successful run 46122804695, sync commit $SYNC_SHA. Original signing group retained in unsigned IPA for upgrades; portable IPA requires binding to signer group. XCTest and package preflight passed. Physical device acceptance pending."
