@@ -1,0 +1,280 @@
+name: YC b54 Smart logical provider release
+on:
+  push:
+    branches: [integration/b54-smart-logical-provider]
+    paths: ['.github/workflows/b54-smart-logical-provider.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+env:
+  APPLE_SHA: e4cdad7cacdd20f6305bded6c97d673095840949
+  SYNC_SHA: 76d01a8bcb7ca253e252cf49c842feb708e79171
+  B54_CORE_SHA: 048ec0280668bf2c311bc36888862273c3da429c
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.11
+          cache: false
+      - name: Initialize LX dependency forks
+        run: git submodule update --init --recursive submodules/utls submodules/wireguard-go submodules/sing-tun submodules/gvisor
+      - name: Verify source and production tags
+        run: |
+          set -euo pipefail
+          test "$(cat go.version)" = go1.26.11
+          git diff --check 0168f2ae88ab990007068e8e48e300aa40a751cf HEAD
+          test -z "$(git status --porcelain)"
+          tags="$(make -f Makefile.lx -s lx-print-tags)"
+          echo "LX_TAGS=$tags" >> "$GITHUB_ENV"
+          for tag in with_utls with_lx_chain with_xhttp with_clash_api with_openconnect with_tailscale; do
+            echo "$tags" | tr ',' '\n' | grep -Fx "$tag"
+          done
+      - name: Compile and regression tests
+        env:
+          GOTOOLCHAIN: local
+          GOFLAGS: -mod=readonly
+        run: |
+          set -euo pipefail
+          go build -ldflags '-checklinkname=0' -tags "$LX_TAGS" ./...
+          go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' -tags "$LX_TAGS" ./common/dialer/ ./common/urltest/ ./common/tls/... ./common/badtls/... ./common/ktls/... ./option/ ./route/... ./protocol/group/... ./protocol/vless/ ./protocol/chain/... ./transport/v2rayxhttp/... ./common/finalmask/... ./experimental/libbox/... ./service/oomkiller/... ./protocol/http/... ./protocol/mixed/...
+          # The reviewed b50 gate also runs encryption separately: sing-vmess Vision
+          # uses unsafe pointer reconstruction which triggers checkptr under -race.
+          # Keep the full encryption test suite in the normal production mode.
+          go test -count=1 -timeout=8m -ldflags '-checklinkname=0' -tags "$LX_TAGS" ./protocol/vless/encryption/
+          git diff --exit-code
+      - name: Build Windows amd64 candidate
+        env:
+          GOTOOLCHAIN: local
+          GOFLAGS: -mod=readonly
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          go build -trimpath -tags "$LX_TAGS" -ldflags "-checklinkname=0 -s -w -X github.com/sagernet/sing-box/constant.Version=1.14.6-lx.37-yc-b54" -o dist/sing-box.exe ./cmd/sing-box
+          lib="$(go mod download -json github.com/sagernet/cronet-go/lib/windows_amd64 | python3 -c 'import sys,json; print(json.load(sys.stdin)["Dir"])')"
+          dll="$(find "$lib" -name libcronet.dll -print -quit)"
+          test -n "$dll"
+          cp "$dll" dist/
+          (cd dist && sha256sum sing-box.exe libcronet.dll > SHA256SUMS)
+          git rev-parse HEAD > dist/source-commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b54-windows-core
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+  libbox:
+    runs-on: xcode-27
+    timeout-minutes: 75
+    env:
+      GOTOOLCHAIN: local
+      CORE_GATE: 92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536
+      CORE_TREE: a078a680649b5f33b3839c05a4e0f489781ffc87
+      CORE_RECIPE: 50244466380951e8dedd1f8c892771a220e1ad91
+      WINDOWS_BASE: 0168f2ae88ab990007068e8e48e300aa40a751cf
+      SYNC_COMMIT: 76d01a8bcb7ca253e252cf49c842feb708e79171
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 92c0d3ad4a7cfea0ef96f53cc7e0a7e77a886536
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.10
+          cache: false
+      - name: Reconstruct reviewed iOS source exactly
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CORE_GATE"
+          git show "$CORE_RECIPE:.github/workflows/b50-ios-ipa.yml" > "$RUNNER_TEMP/b50.yaml"
+          ruby -ryaml -e 'print YAML.load_file(ARGV[0]).fetch("jobs").fetch("build").fetch("steps").find { |s| s["name"] == "Verify pinned sources and try exact three-way merge" }.fetch("run")' "$RUNNER_TEMP/b50.yaml" > "$RUNNER_TEMP/prepare.sh"
+          bash "$RUNNER_TEMP/prepare.sh"
+          test "$(git write-tree)" = "$CORE_TREE"
+          git -c user.name=ci -c user.email=ci@localhost commit -qm 'Reproduce reviewed b50 core'
+      - name: Apply reviewed upstream delta without Windows-specific changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e "$SYNC_COMMIT^{commit}"
+          test "$(git rev-parse "$SYNC_COMMIT^")" = "$WINDOWS_BASE"
+          git diff --binary --full-index "$WINDOWS_BASE" "$SYNC_COMMIT" -- . ':(exclude).github/workflows/**' > "$RUNNER_TEMP/upstream.patch"
+          test -s "$RUNNER_TEMP/upstream.patch"
+          git apply --3way --index "$RUNNER_TEMP/upstream.patch" || { git status --short; git diff --cc; exit 1; }
+          test -z "$(git ls-files -u)"
+          git diff --cached --check
+          git -c user.name=ci -c user.email=ci@localhost commit -qm 'Apply reviewed upstream 1.14.6 delta'
+          # Use the exact reviewed B54 source delta; do not take the Windows tree.
+          test "$(git rev-parse HEAD^{tree})" = d48b5e121c57f2b00d104e49c8800d79b7daf7cf
+          git cat-file -e "$B54_CORE_SHA^{commit}"
+          git diff --binary --full-index 8a34935434fa6f6c7e560f86746c513710106cc7 "$B54_CORE_SHA" -- protocol/group/ > "$RUNNER_TEMP/b54.patch"
+          test -s "$RUNNER_TEMP/b54.patch"
+          git apply --3way --index "$RUNNER_TEMP/b54.patch"
+          test -z "$(git ls-files -u)"
+          git diff --cached --check
+          git -c user.name=ci -c user.email=ci@localhost commit -qm 'Apply B54 logical provider delta'
+          git tag -f v1.14.6-lx.37-yc-b54
+          git rev-parse HEAD^{tree} > "$RUNNER_TEMP/ios-core-tree.txt"
+          git submodule update --init --recursive submodules/utls submodules/wireguard-go submodules/sing-tun submodules/gvisor
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.11
+          cache: false
+      - name: Derive production Apple tags and compile
+        shell: bash
+        env:
+          GOFLAGS: -mod=readonly
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e 'print YAML.load_file(ARGV[0]).fetch("jobs").fetch("build").fetch("steps").find { |s| s["name"] == "Derive complete production Apple tags from build_libbox" }.fetch("run")' "$RUNNER_TEMP/b50.yaml" > "$RUNNER_TEMP/tags.sh"
+          bash "$RUNNER_TEMP/tags.sh"
+          tags="$(sed -n 's/^APPLE_TAGS=//p' "$GITHUB_ENV" | tail -1)"
+          test -n "$tags"
+          go build -ldflags '-checklinkname=0' -tags "$tags" ./...
+      - name: Darwin core regression tests
+        shell: bash
+        env:
+          GOFLAGS: -mod=readonly
+        run: |
+          set -euo pipefail
+          current="$(sysctl -n net.inet.udp.maxdgram)"
+          if [ "$current" -lt 18443 ]; then sudo sysctl -w net.inet.udp.maxdgram=32768; fi
+          ruby -ryaml -e 'print YAML.load_file(ARGV[0]).fetch("jobs").fetch("build").fetch("steps").find { |s| s["name"] == "Isolate upstream UDP test fixture from asynchronous pool repair" }.fetch("run")' "$RUNNER_TEMP/b50.yaml" > "$RUNNER_TEMP/udp-fixture.sh"
+          bash "$RUNNER_TEMP/udp-fixture.sh"
+          go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' -tags "$APPLE_TAGS" ./common/dialer/ ./common/urltest/ ./common/tls/... ./option/ ./route/... ./protocol/group/... ./protocol/vless/ ./protocol/chain/ ./transport/v2rayxhttp/ ./transport/v2rayquic/ ./common/finalmask/... ./experimental/libbox/... ./service/oomkiller/... ./dns/transport/ ./protocol/dns/ ./protocol/http/ ./protocol/mixed/
+          git restore --source=HEAD -- protocol/group/urltest_rr_udp_lx_test.go
+          git diff --exit-code
+      - name: Build device and simulator Libbox
+        shell: bash
+        run: |
+          set -euo pipefail
+          .github/patch_go_for_ios.sh
+          make lib_install
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          go run ./cmd/internal/build_libbox -target apple -platform ios/arm64,iossimulator/arm64
+          test -s Libbox.xcframework/ios-arm64/Libbox.framework/Libbox
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent Libbox.xcframework dist/Libbox.xcframework.zip
+          cp "$RUNNER_TEMP/ios-core-tree.txt" dist/
+          printf '%s\n' "$SYNC_COMMIT" > dist/upstream-sync-commit.txt
+          (cd dist && shasum -a 256 Libbox.xcframework.zip > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b54-ios-libbox
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+  build:
+    needs: libbox
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: eliassmail-dotcom/sing-box-for-apple
+          ref: ${{ env.APPLE_SHA }}
+          submodules: recursive
+          path: apple
+          persist-credentials: false
+      - name: Retrieve accepted device and simulator framework
+        uses: actions/download-artifact@v4
+        with:
+          name: b54-ios-libbox
+          path: framework
+      - name: Verify exact accepted core and prepare framework
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd framework
+          shasum -a 256 -c SHA256SUMS
+          test "$(cat upstream-sync-commit.txt)" = "$SYNC_SHA"
+          core_tree="$(cat ios-core-tree.txt)"
+          [[ "$core_tree" =~ ^[a-f0-9]{40}$ ]]
+          echo "CORE_TREE=$core_tree" >> "$GITHUB_ENV"
+          echo "Core tree: $core_tree" >> "$GITHUB_STEP_SUMMARY"
+          ditto -x -k Libbox.xcframework.zip ../apple/
+          test -s ../apple/Libbox.xcframework/ios-arm64/Libbox.framework/Libbox
+          test -s ../apple/Libbox.xcframework/ios-arm64-simulator/Libbox.framework/Libbox
+      - name: Prepare b54 from patched b53 client
+        working-directory: apple
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$APPLE_SHA"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('sing-box.xcodeproj/project.pbxproj')
+          s = p.read_text()
+          old = 'CURRENT_PROJECT_VERSION = 51;'
+          assert s.count(old) >= 10
+          p.write_text(s.replace(old, 'CURRENT_PROJECT_VERSION = 54;'))
+          p = Path('scripts/build_b51_ios.sh')
+          s = p.read_text()
+          assert s.count('build=51') == 1 and s.count('--build 51') == 2
+          s = s.replace('build=51', 'build=54').replace('--build 51', '--build 54')
+          s = s.replace('SFI-b51-LX37-', 'SFI-b54-1.14.6-LX37-')
+          s = s.replace('b51-signing-tools.zip', 'b54-signing-tools.zip')
+          assert s.count('coreVersion="LX.37"') == 1
+          s = s.replace('coreVersion="LX.37"', 'coreVersion="1.14.6-lx.37-yc-b54", coreFrameworkRun=int(os.environ["GITHUB_RUN_ID"]), upstreamSyncCommit=os.environ["SYNC_SHA"], b54CoreCommit=os.environ["B54_CORE_SHA"]')
+          Path('scripts/build_b54_ios.sh').write_text(s)
+          PY
+          bash -n scripts/build_b54_ios.sh
+      - name: Test archive and inspect b54 IPA
+        working-directory: apple
+        run: bash scripts/build_b54_ios.sh
+      - name: Upload XCTest evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b54-xctest
+          path: |
+            apple/build/B51.xcresult
+            apple/build/XCTestSummary.json
+            apple/build/signing-preflight.json
+            apple/build/portable-preflight.json
+          retention-days: 3
+          if-no-files-found: warn
+      - name: Upload verified IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: b54-upstream-1.14.6-candidate
+          path: |
+            apple/build/SFI-b54-1.14.6-LX37-unsigned.ipa
+            apple/build/SFI-b54-1.14.6-LX37-portable.ipa
+            apple/build/b54-signing-tools.zip
+            apple/build/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+  publish:
+    needs: [build, core]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: b54-upstream-1.14.6-candidate
+      - uses: actions/download-artifact@v4
+        with:
+          name: b54-windows-core
+          path: windows
+      - name: Publish verified candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum -c SHA256SUMS
+          (cd windows && sha256sum -c SHA256SUMS && test "$(cat source-commit.txt)" = "$GITHUB_SHA")
+          (cd windows && zip -q ../sing-box-b54-windows-amd64.zip sing-box.exe libcronet.dll SHA256SUMS source-commit.txt)
+          sha256sum sing-box-b54-windows-amd64.zip > WINDOWS_SHA256SUMS
+          tag="candidate-ios-b54-upstream-1.14.6-run-${GITHUB_RUN_ID}"
+          gh release create "$tag" SFI-b54-1.14.6-LX37-unsigned.ipa SFI-b54-1.14.6-LX37-portable.ipa b54-signing-tools.zip SHA256SUMS sing-box-b54-windows-amd64.zip WINDOWS_SHA256SUMS --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "SFI 1.14.9 b54 (sing-box 1.14.6 + LX.37)" --notes "Logical provider candidates in Smart; Apple $APPLE_SHA; verified new iOS and Windows core from B54 delta $B54_CORE_SHA, upstream sync $SYNC_SHA. XCTest and package preflight passed; physical device acceptance pending."
