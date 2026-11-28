@@ -8,7 +8,7 @@ permissions:
   contents: read
   actions: read
 env:
-  APPLE_SHA: dd5bd39ddbd6e6e2dfb9941e49733821b261f1bf
+  APPLE_SHA: 6e6276abcfbfaf1c93855bc13252717b5a5a392f
   CORE_FRAMEWORK_RUN: "46141980394"
   CORE_GATE_RUN: "46142507622"
   CORE_TREE: b5738364d8b1abe61793567aa8f970cb07155363
