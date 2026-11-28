@@ -180,3 +180,71 @@ func TestB50StaleHealthSelectionDoesNotUndoFallback(t *testing.T) {
 		t.Fatalf("want fallback b, got %v", got)
 	}
 }
+
+func TestB54PriorityProviderPairRetainsFailoverAndTier(t *testing.T) {
+	a, backup := newFailoverNode("primary", 0), newFailoverNode("backup", 0)
+	pair, child := lxNestedURLTest(t, "provider", a, backup)
+	child.failover = true
+	white := newFailoverNode("white", 0)
+	history := urltest.NewHistoryStorage()
+	child.history = history
+	child.setSelectedTCPLx(a)
+	parent := &URLTestGroup{
+		ctx: context.Background(), logger: logger.NOP(),
+		outbounds: []adapter.Outbound{pair, white}, history: history,
+		lxURLTestGroup: lxURLTestGroup{priorityOutbounds: map[string]bool{"provider": true}},
+	}
+	for tag, delay := range map[string]uint16{"primary": 150, "backup": 20, "white": 5} {
+		lxAlive(parent, tag, delay)
+	}
+	if got, _ := parent.selectPriority(N.NetworkTCP); got != pair || RealTag(got, N.NetworkTCP) != "primary" {
+		t.Fatal("a faster backup must not displace a healthy held variant")
+	}
+	history.DeleteURLTestHistory("primary")
+	if got, _ := parent.selectPriority(N.NetworkTCP); got != pair || RealTag(got, N.NetworkTCP) != "backup" {
+		t.Fatal("a live backup must keep the logical node in the preferred tier")
+	}
+	if got := child.pickForDialNode(N.NetworkTCP); got != backup {
+		t.Fatal("dial and parent health must agree on the selected variant")
+	}
+	history.DeleteURLTestHistory("backup")
+	if got, _ := parent.selectPriority(N.NetworkTCP); got != white {
+		t.Fatal("white is allowed only when both preferred variants lack history")
+	}
+	lxAlive(parent, "backup", 200)
+	if got, _ := parent.selectPriority(N.NetworkTCP); got != pair {
+		t.Fatal("preferred logical node must recover before white")
+	}
+}
+
+func TestB54PriorityRotationKeepsProviderVariantsPrivate(t *testing.T) {
+	a, backup := newFailoverNode("primary", 0), newFailoverNode("backup", 0)
+	pair, child := lxNestedURLTest(t, "provider", a, backup)
+	child.failover = true
+	peer, white := newFailoverNode("peer", 0), newFailoverNode("white", 0)
+	history := urltest.NewHistoryStorage()
+	child.history = history
+	child.setSelectedTCPLx(a)
+	parent := &URLTestGroup{
+		ctx: context.Background(), logger: logger.NOP(),
+		outbounds: []adapter.Outbound{pair, peer, white}, history: history,
+		lxURLTestGroup: lxURLTestGroup{priorityOutbounds: map[string]bool{"provider": true, "peer": true}},
+	}
+	parent.setSelectedTCPLx(pair)
+	for tag, delay := range map[string]uint16{"primary": 100, "backup": 20, "peer": 120, "white": 5} {
+		lxAlive(parent, tag, delay)
+	}
+	if got, err := parent.cycleNode(0); err != nil || got != "peer" {
+		t.Fatalf("rotate to another logical candidate, got %s %v", got, err)
+	}
+	if child.selectedForNetworkLx(N.NetworkTCP) != a {
+		t.Fatal("parent rotation must not change the pair's variant")
+	}
+	if got, err := parent.cycleNode(0); err != nil || got != "primary" {
+		t.Fatalf("rotate back to held provider variant, got %s %v", got, err)
+	}
+	history.DeleteURLTestHistory("primary")
+	if !parent.holdSelected(N.NetworkTCP, pair) {
+		t.Fatal("manual hold belongs to logical node, not its previous variant")
+	}
+}

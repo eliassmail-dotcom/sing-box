@@ -337,7 +337,11 @@ func (g *URLTestGroup) testNodes(ctx context.Context, outbounds []adapter.Outbou
 	if g.passiveGuard != nil && !force {
 		eligible := make([]adapter.Outbound, 0, len(outbounds))
 		for _, node := range outbounds {
-			if g.guardAllows(RealTag(node, N.NetworkTCP)) {
+			// A quarantined leaf must not suppress probing the entire nested
+			// failover candidate: the child can still discover a healthy reserve.
+			nested, isNested := node.(*URLTest)
+			logicalChild := len(g.priorityOutbounds) > 0 && isNested && nested.group != nil && nested.group.failover
+			if logicalChild || g.guardAllows(RealTag(node, N.NetworkTCP)) {
 				eligible = append(eligible, node)
 			}
 		}

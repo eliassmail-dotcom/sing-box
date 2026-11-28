@@ -77,13 +77,16 @@ func (g *URLTestGroup) cycleNode(depth int) (string, error) {
 		current, _ = g.Select(N.NetworkTCP)
 	}
 
-	// The normal Smart route is a nested URLTest (base or white). Rotate its
-	// leaf only; never replace a working base group with white on a user tap.
+	// Legacy nested tier pools rotate their leaves. In a flat priority
+	// pool a failover child is one logical node: rotate to a different
+	// candidate in the same tier, not to the child's backup variant.
 	if nested, ok := current.(*URLTest); ok {
 		if nested.group == nil {
 			return "", ErrLXNotRunning
 		}
-		return nested.group.cycleNode(depth + 1)
+		if len(g.priorityOutbounds) == 0 || !nested.group.failover {
+			return nested.group.cycleNode(depth + 1)
+		}
 	}
 
 	var currentRealTag string
@@ -153,7 +156,7 @@ func (g *URLTestGroup) cycleNode(depth int) (string, error) {
 		g.setSelectedUDPLx(next.node)
 		g.noteSelectionChange(N.NetworkUDP)
 	}
-	g.manualHold.Store(&lxManualHold{tag: next.realTag, until: time.Now().Add(lxManualNodeHold)})
+	g.manualHold.Store(&lxManualHold{tag: next.node.Tag(), until: time.Now().Add(lxManualNodeHold)})
 	g.logger.Info("lx manual next node: ", currentRealTag, " -> ", next.realTag)
 	// Refresh the reachability graph and UI. Do not interrupt live streams.
 	invalidateReachability(g.ctx)

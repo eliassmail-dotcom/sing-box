@@ -258,6 +258,13 @@ func (g *URLTestGroup) pickForDialNode(network string) adapter.Outbound {
 		preferred, _ := g.selectPriority(network)
 		return preferred
 	}
+	if g.failover {
+		// Keep a healthy held variant. If its history was invalidated by
+		// another group, use the already healthy reserve instead of hiding
+		// the whole logical node from its parent priority pool.
+		selected, _ := g.failoverSelect(network, false)
+		return selected
+	}
 	if g.balancer == nil && g.penaltyEmergency(network) {
 		if best := g.penaltyBest(network, ""); best != nil {
 			return best

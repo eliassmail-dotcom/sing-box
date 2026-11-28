@@ -110,6 +110,11 @@ func (s *URLTest) All() []string {
 }
 
 func (s *URLTest) Selected(network string) adapter.Outbound {
+	// A parent priority pool must observe the same failover variant that
+	// a new dial would use, not a stale cached leaf with deleted history.
+	if s.group != nil && s.group.failover {
+		return s.group.pickForDialNode(network)
+	}
 	var outbound adapter.Outbound
 	if network == N.NetworkUDP {
 		outbound = s.selectedNowLx(network) // lx: SPEC 019 — the last pick in round_robin

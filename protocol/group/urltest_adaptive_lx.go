@@ -47,7 +47,7 @@ func (g *URLTestGroup) holdSelected(network string, current adapter.Outbound) bo
 		return false
 	}
 	if manual := g.manualHold.Load(); manual != nil &&
-		manual.tag == RealTag(current, network) && time.Now().Before(manual.until) {
+		(manual.tag == current.Tag() || manual.tag == RealTag(current, network)) && time.Now().Before(manual.until) {
 		return true
 	}
 	if g.minHold <= 0 {
