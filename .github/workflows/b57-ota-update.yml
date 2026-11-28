@@ -140,3 +140,17 @@ jobs:
             b57-signing-tools.zip SHA256SUMS --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --prerelease --title "SFI 1.14.9 b57 — Private OTA updater and local generator alpha.61" \
             --notes "Local compiler stage 1 from pinned cloud alpha.61 $LOCAL_GENERATOR_SHA; Apple $APPLE_SHA; reused verified b54 iOS Libbox run $CORE_FRAMEWORK_RUN / tree $CORE_TREE; Node parity, XCTest and package preflight passed. No change to the Yandex Function. Physical signed-device acceptance pending."
+      - name: Notify independent private OTA delivery
+        env:
+          GH_TOKEN: ${{ secrets.OTA_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "Private OTA dispatch token not configured; hourly private discovery is the fallback."
+            exit 0
+          fi
+          tag="candidate-ios-b57-ota-update-run-$GITHUB_RUN_ID"
+          if ! jq -n --arg tag "$tag" '{ref:"main",inputs:{release_tag:$tag,recipient:"auto",publish_ota:true}}' |
+            gh api --method POST repos/eliassmail-dotcom/yfvlconf/actions/workflows/ios-zsign-delivery.yml/dispatches --input - >/dev/null; then
+            echo "::warning::Private OTA dispatch failed; private discovery can retry. Portable release remains valid."
+          fi
