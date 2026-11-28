@@ -1,0 +1,64 @@
+name: Upstream 1.14.6 LX.37 candidate
+on:
+  push:
+    branches: [integration/upstream-1.14.6-lx37]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.11
+          cache: false
+      - name: Initialize LX dependency forks
+        run: git submodule update --init --recursive submodules/utls submodules/wireguard-go submodules/sing-tun submodules/gvisor
+      - name: Verify source and production tags
+        run: |
+          set -euo pipefail
+          test "$(cat go.version)" = go1.26.11
+          git diff --check 0168f2ae88ab990007068e8e48e300aa40a751cf HEAD
+          test -z "$(git status --porcelain)"
+          tags="$(make -f Makefile.lx -s lx-print-tags)"
+          echo "LX_TAGS=$tags" >> "$GITHUB_ENV"
+          for tag in with_utls with_lx_chain with_xhttp with_clash_api with_openconnect with_tailscale; do
+            echo "$tags" | tr ',' '\n' | grep -Fx "$tag"
+          done
+      - name: Compile and regression tests
+        env:
+          GOTOOLCHAIN: local
+          GOFLAGS: -mod=readonly
+        run: |
+          set -euo pipefail
+          go build -ldflags '-checklinkname=0' -tags "$LX_TAGS" ./...
+          go test -race -count=1 -timeout=12m -ldflags '-checklinkname=0' -tags "$LX_TAGS" ./common/dialer/ ./common/urltest/ ./common/tls/... ./common/badtls/... ./common/ktls/... ./option/ ./route/... ./protocol/group/... ./protocol/vless/... ./protocol/chain/... ./transport/v2rayxhttp/... ./common/finalmask/... ./experimental/libbox/... ./service/oomkiller/... ./protocol/http/... ./protocol/mixed/...
+          git diff --exit-code
+      - name: Build Windows amd64 candidate
+        env:
+          GOTOOLCHAIN: local
+          GOFLAGS: -mod=readonly
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          go build -trimpath -tags "$LX_TAGS" -ldflags "-checklinkname=0 -s -w -X github.com/sagernet/sing-box/constant.Version=1.14.6-lx.37-yc-candidate" -o dist/sing-box.exe ./cmd/sing-box
+          lib="$(go mod download -json github.com/sagernet/cronet-go/lib/windows_amd64 | python3 -c 'import sys,json; print(json.load(sys.stdin)["Dir"])')"
+          dll="$(find "$lib" -name libcronet.dll -print -quit)"
+          test -n "$dll"
+          cp "$dll" dist/
+          (cd dist && sha256sum sing-box.exe libcronet.dll > SHA256SUMS)
+          git rev-parse HEAD > dist/source-commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: upstream-1.14.6-lx37-windows-candidate
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
