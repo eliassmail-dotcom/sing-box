@@ -207,6 +207,11 @@ func TestB54PriorityProviderPairRetainsFailoverAndTier(t *testing.T) {
 	if got := child.pickForDialNode(N.NetworkTCP); got != backup {
 		t.Fatal("dial and parent health must agree on the selected variant")
 	}
+	lxAlive(parent, "primary", 1)
+	if got := child.pickForDialNode(N.NetworkTCP); got != backup {
+		t.Fatal("restoring primary must not force failback after reserve is held")
+	}
+	history.DeleteURLTestHistory("primary")
 	history.DeleteURLTestHistory("backup")
 	if got, _ := parent.selectPriority(N.NetworkTCP); got != white {
 		t.Fatal("white is allowed only when both preferred variants lack history")

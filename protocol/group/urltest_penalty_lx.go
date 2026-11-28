@@ -262,7 +262,17 @@ func (g *URLTestGroup) pickForDialNode(network string) adapter.Outbound {
 		// Keep a healthy held variant. If its history was invalidated by
 		// another group, use the already healthy reserve instead of hiding
 		// the whole logical node from its parent priority pool.
-		selected, _ := g.failoverSelect(network, false)
+		expected := g.selectedForNetworkLx(network)
+		selected, fresh := g.failoverSelect(network, false)
+		if fresh && selected != nil && selected != expected {
+			if _, applied := g.updateSelectedLx(network, expected, selected, true); applied {
+				invalidateReachability(g.ctx)
+				g.history.NotifyUpdated()
+			} else {
+				// A concurrent health update or another dial won the race.
+				selected, _ = g.failoverSelect(network, false)
+			}
+		}
 		return selected
 	}
 	if g.balancer == nil && g.penaltyEmergency(network) {
