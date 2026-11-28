@@ -56,7 +56,7 @@ jobs:
           mkdir -p dist
           go build -trimpath -tags "$LX_TAGS" -ldflags "-checklinkname=0 -s -w -X github.com/sagernet/sing-box/constant.Version=$CORE_VERSION" -o dist/sing-box ./cmd/sing-box
           file dist/sing-box
-          lipo -verify_arch x86_64 dist/sing-box
+          lipo dist/sing-box -verify_arch x86_64
           vtool -show-build dist/sing-box | tee dist/macho-audit.txt
           python3 - <<'PY'
           import re
@@ -88,7 +88,7 @@ jobs:
           ditto -x -k dist/singbox-launcher-v2.4.5-macos.zip "$RUNNER_TEMP/launcher"
           app="$(find "$RUNNER_TEMP/launcher" -name '*.app' -type d -print -quit)"
           test -n "$app"
-          lipo -verify_arch x86_64 "$app/Contents/MacOS/singbox-launcher"
+          lipo "$app/Contents/MacOS/singbox-launcher" -verify_arch x86_64
           /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist" | tee dist/launcher-minos.txt
           vtool -arch x86_64 -show-build "$app/Contents/MacOS/singbox-launcher" | tee dist/launcher-macho-audit.txt
           python3 - <<'PY'
