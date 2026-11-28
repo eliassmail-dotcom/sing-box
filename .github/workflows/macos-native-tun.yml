@@ -1,0 +1,143 @@
+name: YC macOS Native TUN Intel
+on:
+  push:
+    branches: [build/macos-ventura-intel]
+    paths: ['.github/workflows/macos-native-tun.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  CORE_SHA: 2909685cb3d1456cc946b1e38cf38c4b4905fab0
+  CORE_DELTA: 048ec0280668bf2c311bc36888862273c3da429c
+  CORE_VERSION: 1.14.6-lx.37-yc-b54
+  LAUNCHER_SHA256: 8cbb051337214c966f1f0e89bac8c6007c1639481acf357f2354154a12e614ac
+jobs:
+  native:
+    runs-on: macos-15-intel
+    timeout-minutes: 50
+    env:
+      GOTOOLCHAIN: local
+      GOFLAGS: -mod=readonly
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.CORE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.11
+          cache: false
+      - name: Verify pinned desktop source and dependency forks
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = x86_64
+          test "$(git rev-parse HEAD)" = "$CORE_SHA"
+          git diff --exit-code "$CORE_DELTA" HEAD -- protocol/group/
+          git submodule update --init --recursive submodules/utls submodules/wireguard-go submodules/sing-tun submodules/gvisor
+          test "$(cat go.version)" = go1.26.11
+          tags="$(make -f Makefile.lx -s lx-print-tags)"
+          tags="${tags/with_purego,/}"
+          for tag in with_lxd with_lx_command with_lx_chain with_openconnect with_utls with_clash_api with_naive_outbound; do
+            echo "$tags" | tr ',' '\n' | grep -Fx "$tag"
+          done
+          echo "LX_TAGS=$tags" >> "$GITHUB_ENV"
+      - name: Compile Intel core with statically linked Cronet
+        env:
+          CGO_ENABLED: '1'
+          GOOS: darwin
+          GOARCH: amd64
+          CGO_CFLAGS: -mmacosx-version-min=13.0
+          CGO_CXXFLAGS: -mmacosx-version-min=13.0
+          CGO_LDFLAGS: -mmacosx-version-min=13.0
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          go build -trimpath -tags "$LX_TAGS" -ldflags "-checklinkname=0 -s -w -X github.com/sagernet/sing-box/constant.Version=$CORE_VERSION" -o dist/sing-box ./cmd/sing-box
+          file dist/sing-box
+          lipo -verify_arch x86_64 dist/sing-box
+          vtool -show-build dist/sing-box | tee dist/macho-audit.txt
+          python3 - <<'PY'
+          import re
+          s=open('dist/macho-audit.txt').read()
+          versions=re.findall(r'\bminos\s+(\d+(?:\.\d+)*)',s)
+          assert versions and all(tuple(map(int,v.split('.'))) <= (13,0,0) for v in versions),s
+          PY
+          otool -L dist/sing-box | tee dist/dynamic-libraries.txt
+          ./dist/sing-box version | tee dist/core-version.txt
+          grep -F "$CORE_VERSION" dist/core-version.txt
+          ./dist/sing-box lxd --help > dist/lxd-help.txt
+      - name: Darwin daemon regression and non-mutating configuration checks
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          set -euo pipefail
+          go test -count=1 -timeout=10m -tags "$LX_TAGS" -ldflags '-checklinkname=0' ./lxd/ ./cmd/sing-box/
+          printf '%s\n' '{"inbounds":[{"type":"tun","tag":"tun-in","address":["172.19.0.1/30"],"auto_route":false}],"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}' > "$RUNNER_TEMP/tun.json"
+          printf '%s\n' '{"outbounds":[{"type":"naive","tag":"naive-out","server":"example.com","server_port":443,"username":"u","password":"p","tls":{"enabled":true}}]}' > "$RUNNER_TEMP/naive.json"
+          ./dist/sing-box check -c "$RUNNER_TEMP/tun.json"
+          ./dist/sing-box check -c "$RUNNER_TEMP/naive.json"
+          ./dist/sing-box lxd --service=install --dry-run > dist/service-plan.txt
+      - name: Verify original upstream graphical launcher
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --output dist/singbox-launcher-v2.4.5-macos.zip https://github.com/Leadaxe/singbox-launcher/releases/download/v2.4.5/singbox-launcher-v2.4.5-macos.zip
+          printf '%s  %s\n' "$LAUNCHER_SHA256" dist/singbox-launcher-v2.4.5-macos.zip | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/launcher"
+          ditto -x -k dist/singbox-launcher-v2.4.5-macos.zip "$RUNNER_TEMP/launcher"
+          app="$(find "$RUNNER_TEMP/launcher" -name '*.app' -type d -print -quit)"
+          test -n "$app"
+          lipo -verify_arch x86_64 "$app/Contents/MacOS/singbox-launcher"
+          /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist" | tee dist/launcher-minos.txt
+          vtool -arch x86_64 -show-build "$app/Contents/MacOS/singbox-launcher" | tee dist/launcher-macho-audit.txt
+          python3 - <<'PY'
+          import re
+          s=open('dist/launcher-macho-audit.txt').read()
+          v=re.findall(r'\b(?:minos|version)\s+(\d+(?:\.\d+)*)',s)
+          assert v and all(tuple(map(int,x.split('.'))) <= (13,0,0) for x in v),s
+          PY
+      - name: Package native core and provenance
+        run: |
+          set -euo pipefail
+          cp LICENSE dist/CORE-LICENSE
+          printf '%s\n' "$CORE_SHA" > dist/core-source.txt
+          cat > dist/README.txt <<'EOF'
+          YC Native TUN Intel candidate — macOS Ventura 13+
+          This contains the YC desktop core and the original Leadaxe launcher v2.4.5 archive.
+          They are separate and the upstream app bundle is not modified.
+          Core source and SHA256 are included. No Apple Network Extension is used.
+          For a test launch, extract the app, and run its Contents/MacOS/singbox-launcher
+          executable as your normal user with SINGBOX_LAUNCHER_CORE set to the absolute
+          path of the extracted YC sing-box binary. Do not run the GUI as root.
+          Choose Daemon mode and follow the launcher's protected-copy install and
+          mTLS pairing flow. Never use --allow-unsafe-exec or disable SIP.
+          Do not approve a replacement core download without checking the version.
+          This is a candidate: actual Ventura TUN, DNS recovery and our cloud
+          configuration compatibility need physical-machine acceptance.
+          EOF
+          (cd dist && shasum -a 256 sing-box singbox-launcher-v2.4.5-macos.zip > SHA256SUMS)
+          mkdir -p release
+          ditto -c -k --keepParent dist release/YC-Native-TUN-Intel-candidate.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yc-native-tun-intel-candidate
+          path: release/YC-Native-TUN-Intel-candidate.zip
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    needs: native
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: yc-native-tun-intel-candidate
+      - name: Publish candidate only after gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha256sum YC-Native-TUN-Intel-candidate.zip > SHA256SUMS
+          gh release create "candidate-macos-native-tun-intel-run-$GITHUB_RUN_ID" YC-Native-TUN-Intel-candidate.zip SHA256SUMS --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "YC Native TUN Intel — Ventura candidate" --notes "Verified Intel desktop core build, Mach-O minimum, lxd regression and config checks. Includes unmodified upstream launcher. Physical Ventura TUN and YC profile acceptance pending; not a production release."
