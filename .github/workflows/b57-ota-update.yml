@@ -1,0 +1,142 @@
+name: YC b57 private OTA updater
+on:
+  push:
+    branches: [build/b57-ota-update]
+    paths: ['.github/workflows/b57-ota-update.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+env:
+  APPLE_SHA: f1d79edf2c86520aa3668cc39b1f2f1325abdbcb
+  CORE_FRAMEWORK_RUN: "46141980394"
+  CORE_GATE_RUN: "46142507622"
+  CORE_TREE: b5738364d8b1abe61793567aa8f970cb07155363
+  SYNC_SHA: 76d01a8bcb7ca253e252cf49c842feb708e79171
+  B54_CORE_SHA: 048ec0280668bf2c311bc36888862273c3da429c
+  LOCAL_GENERATOR_SHA: 660b917f48d7b96cd029699e8d73a2091574a333
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: eliassmail-dotcom/sing-box-for-apple
+          ref: ${{ env.APPLE_SHA }}
+          submodules: recursive
+          path: apple
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Pinned alpha.61 compiler and Node parity
+        working-directory: apple
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$APPLE_SHA"
+          node scripts/test_local_generator_v2.mjs
+      - name: Require the verified b54 framework and regression gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CORE_FRAMEWORK_RUN/jobs" > "$RUNNER_TEMP/b54-jobs.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CORE_GATE_RUN" > "$RUNNER_TEMP/b54-gate.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])
+          jobs={x['name']:x['conclusion'] for x in json.loads((p/'b54-jobs.json').read_text())['jobs']}
+          gate=json.loads((p/'b54-gate.json').read_text())
+          assert jobs.get('libbox')=='success' and jobs.get('build')=='success', jobs
+          assert gate['conclusion']=='success' and gate['head_sha']=='2909685cb3d1456cc946b1e38cf38c4b4905fab0',gate['conclusion']
+          PY
+      - name: Reuse accepted device and simulator Libbox (no core rebuild)
+        uses: actions/download-artifact@v4
+        with:
+          name: b54-ios-libbox
+          run-id: 46141980394
+          github-token: ${{ github.token }}
+          path: framework
+      - name: Verify framework and source provenance
+        run: |
+          set -euo pipefail
+          cd framework
+          shasum -a 256 -c SHA256SUMS
+          test "$(cat upstream-sync-commit.txt)" = "$SYNC_SHA"
+          test "$(cat ios-core-tree.txt)" = "$CORE_TREE"
+          ditto -x -k Libbox.xcframework.zip ../apple/
+          test -s ../apple/Libbox.xcframework/ios-arm64/Libbox.framework/Libbox
+          test -s ../apple/Libbox.xcframework/ios-arm64-simulator/Libbox.framework/Libbox
+      - name: Prepare b57 from the verified packaging recipe
+        working-directory: apple
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('sing-box.xcodeproj/project.pbxproj')
+          s=p.read_text()
+          old='CURRENT_PROJECT_VERSION = 51;'
+          assert s.count(old)>=10
+          p.write_text(s.replace(old,'CURRENT_PROJECT_VERSION = 57;'))
+          p=Path('scripts/build_b51_ios.sh')
+          s=p.read_text()
+          assert s.count('build=51')==1 and s.count('--build 51')==2
+          s=s.replace('build=51','build=57').replace('--build 51','--build 57')
+          s=s.replace('SFI-b51-LX37-','SFI-b57-1.14.6-LX37-').replace('b51-signing-tools.zip','b57-signing-tools.zip')
+          s=s.replace("'VPNStartupWaitPolicyTests']", "'VPNStartupWaitPolicyTests', 'LocalGeneratorEngineTests', 'IOSOTAUpdateTests']")
+          assert s.count('coreVersion="LX.37"')==1
+          s=s.replace('coreVersion="LX.37"', 'coreVersion="1.14.6-lx.37-yc-b54", coreFrameworkRun=int(os.environ["CORE_FRAMEWORK_RUN"]), upstreamSyncCommit=os.environ["SYNC_SHA"], b54CoreCommit=os.environ["B54_CORE_SHA"], localGeneratorVersion="2.0.0-alpha.61", localGeneratorSource=os.environ["LOCAL_GENERATOR_SHA"]')
+          Path('scripts/build_b57_ios.sh').write_text(s)
+          PY
+          bash -n scripts/build_b57_ios.sh
+      - name: XCTest, archive and inspect b57 IPA
+        working-directory: apple
+        run: bash scripts/build_b57_ios.sh
+      - name: Upload XCTest evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b57-ota-update-xctest
+          path: |
+            apple/build/B51.xcresult
+            apple/build/XCTestSummary.json
+            apple/build/test-list.json
+            apple/build/signing-preflight.json
+            apple/build/portable-preflight.json
+          retention-days: 3
+          if-no-files-found: warn
+      - name: Upload verified IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: b57-ota-update-candidate
+          path: |
+            apple/build/SFI-b57-1.14.6-LX37-unsigned.ipa
+            apple/build/SFI-b57-1.14.6-LX37-portable.ipa
+            apple/build/b57-signing-tools.zip
+            apple/build/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: b57-ota-update-candidate
+      - name: Publish verified candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha256sum -c SHA256SUMS
+          gh release create "candidate-ios-b57-ota-update-run-$GITHUB_RUN_ID" \
+            SFI-b57-1.14.6-LX37-unsigned.ipa SFI-b57-1.14.6-LX37-portable.ipa \
+            b57-signing-tools.zip SHA256SUMS --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --prerelease --title "SFI 1.14.9 b57 — Private OTA updater and local generator alpha.61" \
+            --notes "Local compiler stage 1 from pinned cloud alpha.61 $LOCAL_GENERATOR_SHA; Apple $APPLE_SHA; reused verified b54 iOS Libbox run $CORE_FRAMEWORK_RUN / tree $CORE_TREE; Node parity, XCTest and package preflight passed. No change to the Yandex Function. Physical signed-device acceptance pending."
